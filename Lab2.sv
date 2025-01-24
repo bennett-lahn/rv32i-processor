@@ -13,7 +13,7 @@ module core(
     ,input  memory_io_rsp   instr_mem_rsp
     ,output memory_io_req   data_mem_req
     ,input  memory_io_rsp   data_mem_rsp
-    );
+);
 
     typedef enum {
         stage_fetch
@@ -93,16 +93,16 @@ module core(
     reg_data_t rd_data_to_writeback;
 
     // if true, rd_data_to_writeback needs to be written to register file
-    logic write_back_enable;
+    logic writeback_enable;
 
-    // Decode: fetch registers, if any
+    // Decode: Decode instruction, fetch registers, if any
 
     // I think this logic is okay because this circuit updates the register addresses, which is
     // synchronously used by register file to update read_data, which does not change until after
     // execute, even if read_addr changes
     always_comb begin
         if (current_stage == stage_decode) begin
-            reg_load_type = decode_opcode(reg_instr_data.r_type.opcode) // Opcode for instr data
+            reg_load_type = decode_opcode(reg_instr_data.r_type.opcode); // Opcode for instr data
             case (reg_load_type)
                 INSTR_R_TYPE: begin
                     register_io.read_reg_addr_1 = reg_instr_data.r_type.rs1;
@@ -180,9 +180,10 @@ module core(
     // If executed instruction is r-type or non_load/jump i-type, immediately write back to register file during execute stage
     // Only always_comb block where register_io.write_enable is written to
     always_comb begin
-        if (stage_writeback && write_back_enable) begin
+        if (stage_writeback && writeback_enable) begin
             register_io.write_enable = 1'b1;
-            register_io.write_reg_addr = 
+            register_io.write_reg_addr = rd_writeback_addr;
+            register_io.write_data = rd_data_to_writeback;
         end else begin
             register_io.write_enable = 1'b0;
         end
@@ -190,13 +191,14 @@ module core(
 
     // Control flow for stage change
     always @(posedge clk) begin
-        if (reset)
+        if (reset) begin
             current_stage <= stage_fetch;
-            curr_instr_data <= 32{1'b0};
+            curr_instr_data <= REG_ZERO_VAL;
             curr_instr_select <= X_UNKNOWN;
             rd_data_to_writeback <= REG_ZERO_VAL;
-            write_back_enable <= 1'b0
-        else begin
+            rd_writeback_addr <= REG_ZERO;
+            writeback_enable <= 1'b0
+        end else begin
             case (current_stage)
                 stage_fetch:
                     current_stage <= stage_decode;
@@ -207,10 +209,11 @@ module core(
                 stage_execute:
                     current_stage <= stage_mem;
                     if (curr_instr_select < I_LB && curr_instr_select != J_ALR) begin
-                        write_back_enable <= 1'b1;
+                        writeback_enable <= 1'b1;
                         rd_data_to_writeback <= rd_data;
+                        rd_writeback_addr <= curr_instr_data.i_type.rd; // Instruction type doesn't matter
                     end else begin
-                        write_back_enable <= 1'b0;
+                        writeback_enable <= 1'b0;
                     end
                 stage_mem:
                     current_stage <= stage_writeback;
@@ -473,13 +476,15 @@ module register_file (
                 reg_file[i] <= REG_ZERO_VAL;
             end
         end else begin
-            if (write_enable && write_reg_addr != REG_ZERO) begin
+            if (write_enable && write_reg_addr != REG_ZERO)
                 reg_file[write_reg_addr] <= write_data; // Write
             // Read
             read_data_1 <= (read_reg_addr_1 == REG_ZERO) ? REG_ZERO_VAL : reg_file[read_reg_addr_1];
             read_data_2 <= (read_reg_addr_2 == REG_ZERO) ? REG_ZERO_VAL : reg_filel[read_reg_addr_2];
+        
         end
     end
+
 endmodule : register_file
 
 `endif
