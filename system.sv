@@ -236,4 +236,24 @@ typedef enum logic [5:0] {
     ,X_UNKNOWN
 } instr_select_t;
 
+// Register file variables
+
+// Values for x0 register; data and address
+localparam logic [31:0] REG_ZERO_VAL = 32'd0;
+localparam reg_index_t REG_ZERO = 5'd0;
+
+// 32-bit type representing data to/from registers
+typedef logic [31:0] reg_data_t;
+
+// Struct for easier manipulation of register file I/O
+typedef struct packed {
+    reg_index_t read_reg_addr_1;
+    reg_index_t read_reg_addr_2;
+    reg_index_t write_reg_addr;
+    reg_data_t write_data;
+    logic write_enable;
+    reg_data_t read_data_1;
+    reg_data_t read_data_2;
+} reg_file_io_t;
+
 `endif
