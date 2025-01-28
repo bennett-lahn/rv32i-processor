@@ -15,6 +15,10 @@ module core (
     ,input  memory_io_rsp   data_mem_rsp
 );
 
+    // Program counter
+    word pc;
+
+    // Enum for processor cycle stages
     typedef enum {
         stage_fetch
         ,stage_decode
@@ -25,29 +29,12 @@ module core (
 
     stage current_stage;
 
-    // Fetch stage
-    // Retrives next instruction from memory
-    // Valid bit ignored for now
-    word pc;
-    always_comb begin
-        if (current_stage == stage_fetch) begin
-        	instr_mem_req.addr = pc;
-            instr_mem_req.do_read  = 4'b1111;
-            instr_mem_req.valid = true;
-    	end
-    end
-
-    // Program counter control
-    always @(posedge clk) begin
-       if (reset)
-          pc <= reset_pc;
-
-       if (current_stage == stage_writeback)
-          pc <= pc + 4;
-    end
-
     // Input/output driving register file interaction
     reg_file_io_t register_io;
+
+    // Continuously update register read based on current instruction rs1/rs2
+    assign register_io.read_reg_addr_1 = update_rs1_addr(reg_instr_data);
+    assign register_io.read_reg_addr_2 = update_rs2_addr(reg_instr_data);
 
     // Initialize register file, using register_io for in/out
     register_file_m registers (
@@ -68,27 +55,20 @@ module core (
     // Specific instruction data corresponds to
     instr_select_t curr_instr_select; 
 
-    // Decides which parts of instruction to use to load registers
-    instr_type_t reg_load_type;
-
     // Copy of curr_instr_data used to fetch from registers
     rv32i_instruction_t reg_instr_data;
-    always reg_instr_data.raw = instr_mem_rsp.data;
+    assign reg_instr_data.raw = instr_mem_rsp.data;
 
     // rs1 data from register file
     reg_data_t rs1_data;
-    always rs1_data = register_io.read_data_1;
+    assign rs1_data = register_io.read_data_1;
     
     // rs2 data from register file
     reg_data_t rs2_data;
     always rs2_data = register_io.read_data_2;
 
-    // rd data calculated by execution stage, stored for writeback
-    reg_data_t rd_data;
-
     // Address for register to be written back, stored for writeback
     reg_index_t rd_writeback_addr;
-
 
     // Registered rd data waiting for writeback
     reg_data_t rd_data_to_writeback;
@@ -96,101 +76,52 @@ module core (
     // if true, rd_data_to_writeback needs to be written to register file
     logic writeback_enable;
 
-    // Decode: Decode instruction, fetch registers, if any
-
-    // I think this logic is okay because this circuit updates the register addresses, which is
-    // synchronously used by register file to update read_data, which does not change until after
-    // execute, even if read_addr changes
+    // Memory request logic for fetch, mem stage
+    // TODO: Implement valid bit logic
     always_comb begin
-        if (current_stage == stage_decode) begin
-            reg_load_type = decode_opcode(reg_instr_data.r_type.opcode); // Opcode for instr data
-            case (reg_load_type)
-                INSTR_R_TYPE: begin
-                    register_io.read_reg_addr_1 = reg_instr_data.r_type.rs1;
-                    register_io.read_reg_addr_2 = reg_instr_data.r_type.rs2;
-                end
-                INSTR_I_TYPE: begin
-                    register_io.read_reg_addr_1 = reg_instr_data.i_type.rs1;
-                end
-                // INSTR_S_TYPE: return decode_s_type(instr.s_type);
-                // INSTR_B_TYPE: return decode_b_type(instr.b_type);
-                // INSTR_U_TYPE: return decode_u_type(instr.u_type);
-                // INSTR_J_TYPE: return decode_j_type(instr.j_type);
-                default: begin
-                    register_io.read_reg_addr_1 = REG_ZERO;
-                    register_io.read_reg_addr_2 = REG_ZERO;
-                end
-            endcase
+        if (current_stage == stage_fetch) begin
+            instr_mem_req.valid = 1;
+            instr_mem_req.addr = pc;
+            instr_mem_req.do_read  = 4'b1111;
+            instr_mem_req.do_write = 4'b0000;
+        end else if (current_stage == stage_mem) begin
+            // Do things
+            instr_mem_req.valid = 0;
+            instr_mem_req.addr = pc;
+            instr_mem_req.do_read  = 4'b0000;
+            instr_mem_req.do_write = 4'b0000;
+            instr_mem_req.valid = 0;
+        end else begin
+            instr_mem_req.valid = 0;
+            instr_mem_req.addr = pc;
+            instr_mem_req.do_read  = 4'b0000;
+            instr_mem_req.do_write = 4'b0000;
+            instr_mem_req.valid = 0;
         end
     end
 
-    // Execute: select and execute instruction
-    // Note: In the future, rd_data will have to be stored in temp register to be written back later (for some instructions)
-    always_comb begin
-        if (current_stage == stage_execute) begin
-            case (curr_instr_select)
-                R_ADD:  rd_data = execute_add(rs1_data, rs2_data);
-                R_SUB:  rd_data = execute_sub(rs1_data, rs2_data);
-                R_AND:  rd_data = execute_and(rs1_data, rs2_data);
-                R_OR:   rd_data = execute_or(rs1_data, rs2_data);
-                R_XOR:  rd_data = execute_xor(rs1_data, rs2_data);
-                R_SLL:  rd_data = execute_sll(rs1_data, rs2_data);
-                R_SRL:  rd_data = execute_srl(rs1_data, rs2_data);
-                R_SRA:  rd_data = execute_sra(rs1_data, rs2_data);
-                R_SLT:  rd_data = execute_slt(rs1_data, rs2_data);
-                R_SLTU: rd_data = execute_sltu(rs1_data, rs2_data);
+    // Program counter control
+    always @(posedge clk) begin
+       if (reset)
+          pc <= reset_pc;
 
-                I_ADDI: rd_data = execute_addi(curr_instr_data.i_type, rs1_data);
-                // I_JALR: rd_data = execute_jalr(curr_instr_data.i_type, rs1_data);
-                I_SLLI: rd_data = execute_slli(curr_instr_data.i_type, rs1_data);
-                I_SRLI: rd_data = execute_srli(curr_instr_data.i_type, rs1_data);
-                I_SRAI: rd_data = execute_srai(curr_instr_data.i_type, rs1_data);
-                I_SLTI: rd_data = execute_slti(curr_instr_data.i_type, rs1_data);
-                I_XORI: rd_data = execute_xori(curr_instr_data.i_type, rs1_data);
-                I_ANDI: rd_data = execute_andi(curr_instr_data.i_type, rs1_data);
-                I_ORI:  rd_data = execute_ori(curr_instr_data.i_type, rs1_data);
-                I_SLTIU:rd_data = execute_sltiu(curr_instr_data.i_type, rs1_data);
-                // I_LB:
-                // I_LH:
-                // I_LW:
-                // I_LBU:
-                // I_LHU:
-
-                // S_SB:
-                // S_SH:
-                // S_SW:
-
-                // B_BEQ:
-                // B_BNE:
-                // B_BLT:
-                // B_BGE:
-                // B_BLTU:
-                // B_BGEU:
-
-                // U_LUI:
-                // U_AUIPC:
-
-                // J_JAL:
-
-                default: rd_data = execute_unknown();
-            endcase
-        end
+       if (current_stage == stage_writeback)
+          pc <= pc + 4;
     end
 
-    // Write back: register write back
-    // If executed instruction is r-type or non_load/jump i-type, immediately write back to register file during execute stage
-    // Only always_comb block where register_io.write_enable is written to
+    // Register writeback
+    // Control logic for whether write enable to registers is true
     always_comb begin
         if (current_stage == stage_writeback && writeback_enable) begin
             register_io.write_enable = 1'b1;
-            register_io.write_reg_addr = rd_writeback_addr;
-            register_io.write_data = rd_data_to_writeback;
         end else begin
             register_io.write_enable = 1'b0;
         end
+        register_io.write_reg_addr = rd_writeback_addr;
+        register_io.write_data = rd_data_to_writeback;
     end
 
-    // Control flow for stage change
+    // Processor control flow for stage change, data path
     always @(posedge clk) begin
         if (reset) begin
             current_stage <= stage_fetch;
@@ -210,6 +141,10 @@ module core (
                 end
                 stage_execute: begin
                     current_stage <= stage_mem;
+                    rd_data_to_writeback <= execute_instr(curr_instr_select, rs1_data, rs2_data);
+                    rd_writeback_addr <= curr_instr_data.r_type.rd; // All types use same rd bits
+                    // Only writeback for appropriate instructions
+                    writeback_enable <= (curr_instr_select < S_SB || curr_instr_select > B_BGEU) ? 1 : 0;
                 end
                 stage_mem:
                     current_stage <= stage_writeback;
@@ -234,7 +169,7 @@ module core (
             // INSTR_B_TYPE: return decode_b_type(instr.b_type);
             // INSTR_U_TYPE: return decode_u_type(instr.u_type);
             // INSTR_J_TYPE: return decode_j_type(instr.j_type);
-            default: return execute_unknown(); // TODO: Add function returning correct type
+            default: return X_UNKNOWN; // TODO: Add function returning correct type
         endcase
     endfunction
 
@@ -257,12 +192,12 @@ module core (
     // Decodes and executes appropriate R-type instruction given r_type_t input
     function instr_select_t decode_r_type(r_type_t instr);
         case (instr.funct3)
-            FUNCT3_ADD_SUB: return (instr.funct7 == FUNCT7_ADD) ? R_ADD : (instr.funct7 == FUNCT7_SUB) ? R_SUB : X_UNKNOWN;
+            FUNCT3_ADD_SUB: return instr_select_t'((instr.funct7 == FUNCT7_ADD) ? R_ADD : (instr.funct7 == FUNCT7_SUB) ? R_SUB : X_UNKNOWN);
             FUNCT3_AND:     return R_AND;
             FUNCT3_OR:      return R_OR;
             FUNCT3_XOR:     return R_XOR;
             FUNCT3_SLL:     return R_SLL;
-            FUNCT3_SRL_SRA: return (instr.funct7 == FUNCT7_SRL) ? R_SRL : (instr.funct7 == FUNCT7_SRA) ? R_SRA : X_UNKNOWN;
+            FUNCT3_SRL_SRA: return instr_select_t'((instr.funct7 == FUNCT7_SRL) ? R_SRL : (instr.funct7 == FUNCT7_SRA) ? R_SRA : X_UNKNOWN);
             FUNCT3_SLT:     return R_SLT;
             FUNCT3_SLTU:    return R_SLTU;
             default:        return X_UNKNOWN; // Handle unknown instructions by doing nothing
@@ -272,15 +207,95 @@ module core (
     // Decodes and executes appropriate I-type instruction given i_type_t input
     function instr_select_t decode_i_type(i_type_t instr);
         case (instr.funct3)
-            FUNCT3_ADDI:     return (instr.opcode == OPCODE_IMM) ? I_ADDI : (instr.opcode == OPCODE_JALR) ? I_JALR : X_UNKNOWN;
-            FUNCT3_SLLI:     return (instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SLLI) ? I_SLLI : X_UNKNOWN;
-            FUNCT3_SRLI:     return (instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRLI) ? I_SRLI : (instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRAI) ? I_SRAI : X_UNKNOWN;
-            FUNCT3_SLTI:     return (instr.opcode == OPCODE_IMM) ? I_SLTI : X_UNKNOWN;
-            FUNCT3_XORI:     return (instr.opcode == OPCODE_IMM) ? I_XORI : X_UNKNOWN;
+            FUNCT3_ADDI:     return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_ADDI : (instr.opcode == OPCODE_JALR) ? I_JALR : X_UNKNOWN);
+            FUNCT3_SLLI:     return instr_select_t'((instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SLLI) ? I_SLLI : X_UNKNOWN);
+            FUNCT3_SRLI:     return instr_select_t'((instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRLI) ? I_SRLI : (instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRAI) ? I_SRAI : X_UNKNOWN);
+            FUNCT3_SLTI:     return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_SLTI : X_UNKNOWN);
+            FUNCT3_XORI:     return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_XORI : X_UNKNOWN);
             FUNCT3_ANDI:     return I_ANDI;
             FUNCT3_ORI:      return I_ORI;
             FUNCT3_SLTIU:    return I_SLTIU;
             default:         return X_UNKNOWN; // Handle unsupported instructions
+        endcase
+    endfunction
+
+    function reg_index_t update_rs1_addr(rv32i_instruction_t reg_instr_data);
+        // Decides which parts of instruction to use to load registers
+        instr_type_t reg_load_type;
+        reg_load_type = decode_opcode(reg_instr_data.r_type.opcode); // Opcode same for all instr types
+        case (reg_load_type)
+            INSTR_R_TYPE: return reg_instr_data.r_type.rs1;
+            INSTR_I_TYPE: return reg_instr_data.i_type.rs1;
+            // INSTR_S_TYPE: return decode_s_type(instr.s_type);
+            // INSTR_B_TYPE: return decode_b_type(instr.b_type);
+            // INSTR_U_TYPE: return decode_u_type(instr.u_type);
+            // INSTR_J_TYPE: return decode_j_type(instr.j_type);
+            default: return REG_ZERO;
+        endcase
+    endfunction
+
+    function reg_index_t update_rs2_addr(rv32i_instruction_t reg_instr_data);
+        // Decides which parts of instruction to use to load registers
+        instr_type_t reg_load_type;
+        reg_load_type = decode_opcode(reg_instr_data.r_type.opcode); // Opcode same for all instr types
+        case (reg_load_type)
+            INSTR_R_TYPE: return reg_instr_data.r_type.rs2;
+            INSTR_I_TYPE: return REG_ZERO;
+            // INSTR_S_TYPE: return decode_s_type(instr.s_type);
+            // INSTR_B_TYPE: return decode_b_type(instr.b_type);
+            // INSTR_U_TYPE: return decode_u_type(instr.u_type);
+            // INSTR_J_TYPE: return decode_j_type(instr.j_type);
+            default: return REG_ZERO;
+        endcase
+    endfunction
+
+
+    function reg_data_t execute_instr(instr_select_t curr_instr_select, reg_data_t rs1_data, reg_data_t rs2_data);
+        case (curr_instr_select)
+            R_ADD:  return execute_add(rs1_data, rs2_data);
+            R_SUB:  return execute_sub(rs1_data, rs2_data);
+            R_AND:  return execute_and(rs1_data, rs2_data);
+            R_OR:   return execute_or(rs1_data, rs2_data);
+            R_XOR:  return execute_xor(rs1_data, rs2_data);
+            R_SLL:  return execute_sll(rs1_data, rs2_data);
+            R_SRL:  return execute_srl(rs1_data, rs2_data);
+            R_SRA:  return execute_sra(rs1_data, rs2_data);
+            R_SLT:  return execute_slt(rs1_data, rs2_data);
+            R_SLTU: return execute_sltu(rs1_data, rs2_data);
+
+            I_ADDI: return execute_addi(curr_instr_data.i_type, rs1_data);
+            // I_JALR: rd_data = execute_jalr(curr_instr_data.i_type, rs1_data);
+            I_SLLI: return execute_slli(curr_instr_data.i_type, rs1_data);
+            I_SRLI: return execute_srli(curr_instr_data.i_type, rs1_data);
+            I_SRAI: return execute_srai(curr_instr_data.i_type, rs1_data);
+            I_SLTI: return execute_slti(curr_instr_data.i_type, rs1_data);
+            I_XORI: return execute_xori(curr_instr_data.i_type, rs1_data);
+            I_ANDI: return execute_andi(curr_instr_data.i_type, rs1_data);
+            I_ORI:  return execute_ori(curr_instr_data.i_type, rs1_data);
+            I_SLTIU:return execute_sltiu(curr_instr_data.i_type, rs1_data);
+            // I_LB:
+            // I_LH:
+            // I_LW:
+            // I_LBU:
+            // I_LHU:
+
+            // S_SB:
+            // S_SH:
+            // S_SW:
+
+            // B_BEQ:
+            // B_BNE:
+            // B_BLT:
+            // B_BGE:
+            // B_BLTU:
+            // B_BGEU:
+
+            // U_LUI:
+            // U_AUIPC:
+
+            // J_JAL:
+
+            default: return execute_unknown();
         endcase
     endfunction
 
