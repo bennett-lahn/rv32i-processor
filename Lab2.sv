@@ -4,6 +4,7 @@
 `include "base.sv"
 `include "memory_io.sv"
 `include "memory.sv"
+`include "Lab1.sv"
 
 module core (
     input logic  clk
@@ -29,12 +30,42 @@ module core (
 
     stage current_stage;
 
+    // Data for current instruction to be executed
+    rv32i_instruction_t curr_instr_data; 
+
+    // Specific instruction data corresponds to
+    instr_select_t curr_instr_select; 
+
+    // Copy of curr_instr_data used to fetch from registers
+    rv32i_instruction_t reg_instr_data;
+    assign reg_instr_data.raw = instr_mem_rsp.data;
+
     // Input/output driving register file interaction
     reg_file_io_t register_io;
+
+    // rs1 data from register file
+    reg_data_t rs1_data;
+    assign rs1_data = register_io.read_data_1;
+    
+    // rs2 data from register file
+    reg_data_t rs2_data;
+    assign rs2_data = register_io.read_data_2;
+
+    // Address for register to be written back, stored for writeback
+    reg_index_t rd_writeback_addr;
+
+    // Registered rd data waiting for writeback
+    reg_data_t rd_data_to_writeback;
+
+    // if true, rd_data_to_writeback needs to be written to register file
+    logic writeback_enable;
 
     // Continuously update register read based on current instruction rs1/rs2
     assign register_io.read_reg_addr_1 = update_rs1_addr(reg_instr_data);
     assign register_io.read_reg_addr_2 = update_rs2_addr(reg_instr_data);
+    assign register_io.write_reg_addr = rd_writeback_addr;
+    assign register_io.write_data = rd_data_to_writeback;
+    assign register_io.write_enable = check_writeback(current_stage, writeback_enable);
 
     // Initialize register file, using register_io for in/out
     register_file_m registers (
@@ -48,33 +79,6 @@ module core (
         ,.read_data_1(register_io.read_data_1)
         ,.read_data_2(register_io.read_data_2)
     );
-
-    // Data for current instruction to be executed
-    rv32i_instruction_t curr_instr_data; 
-
-    // Specific instruction data corresponds to
-    instr_select_t curr_instr_select; 
-
-    // Copy of curr_instr_data used to fetch from registers
-    rv32i_instruction_t reg_instr_data;
-    assign reg_instr_data.raw = instr_mem_rsp.data;
-
-    // rs1 data from register file
-    reg_data_t rs1_data;
-    assign rs1_data = register_io.read_data_1;
-    
-    // rs2 data from register file
-    reg_data_t rs2_data;
-    always rs2_data = register_io.read_data_2;
-
-    // Address for register to be written back, stored for writeback
-    reg_index_t rd_writeback_addr;
-
-    // Registered rd data waiting for writeback
-    reg_data_t rd_data_to_writeback;
-
-    // if true, rd_data_to_writeback needs to be written to register file
-    logic writeback_enable;
 
     // Memory request logic for fetch, mem stage
     // TODO: Implement valid bit logic
@@ -109,18 +113,6 @@ module core (
           pc <= pc + 4;
     end
 
-    // Register writeback
-    // Control logic for whether write enable to registers is true
-    always_comb begin
-        if (current_stage == stage_writeback && writeback_enable) begin
-            register_io.write_enable = 1'b1;
-        end else begin
-            register_io.write_enable = 1'b0;
-        end
-        register_io.write_reg_addr = rd_writeback_addr;
-        register_io.write_data = rd_data_to_writeback;
-    end
-
     // Processor control flow for stage change, data path
     always @(posedge clk) begin
         if (reset) begin
@@ -132,24 +124,43 @@ module core (
             writeback_enable <= 1'b0;
         end else begin
             case (current_stage)
-                stage_fetch:
-                    current_stage <= stage_decode;
+                stage_fetch: begin
+                    $display("[FETCH] Fetching instruction at PC: %h", pc);
+                    if (instr_mem_rsp.valid) begin
+                        $display("[STAGE] Transitioning to DECODE");
+                        current_stage <= stage_decode;
+                        curr_instr_data <= instr_mem_rsp.data;
+                    end else begin
+                        current_stage <= stage_fetch;
+                    end
+                end
                 stage_decode: begin
+                    $display("[DECODE] Decoding instruction, should be:");
+                    print_instruction(pc, curr_instr_data.raw);
                     current_stage <= stage_execute;
-                    curr_instr_data <= instr_mem_rsp.data;
                     curr_instr_select <= parse_instruction(instr_mem_rsp.data);
+                    $display("[STAGE] Transitioning to EXECUTE");
                 end
                 stage_execute: begin
                     current_stage <= stage_mem;
+                    $display("[EXECUTE] Executing instruction %s", curr_instr_select.name());
+                    $display("[EXECUTE] If valid: rs1 val %d, rs2 val %d, imm val %d", curr_instr_data.r_type.rs1, curr_instr_data.r_type.rs2, $signed(curr_instr_data.i_type.imm));
                     rd_data_to_writeback <= execute_instr(curr_instr_select, rs1_data, rs2_data);
                     rd_writeback_addr <= curr_instr_data.r_type.rd; // All types use same rd bits
                     // Only writeback for appropriate instructions
                     writeback_enable <= (curr_instr_select < S_SB || curr_instr_select > B_BGEU) ? 1 : 0;
+                    $display("[STAGE] Transitioning to MEM");
                 end
-                stage_mem:
+                stage_mem: begin
+                    $display("[EXECUTE] Got result %d to return to reg %d", $signed(rd_data_to_writeback), rd_writeback_addr);
                     current_stage <= stage_writeback;
-                stage_writeback:
+                    $display("[STAGE] Transitioning to WRITEBACK");
+                end
+                stage_writeback: begin
                     current_stage <= stage_fetch;
+                    $display("[WRITEBACK] State: Writeback to reg %d with reg value %d, writeback_enable: %d", rd_writeback_addr, $signed(rd_data_to_writeback), writeback_enable);
+                    $display("[STAGE] Transitiong to FETCH");
+                end
                 default: begin
                     $display("Should never get here");
                     current_stage <= stage_fetch;
@@ -249,6 +260,14 @@ module core (
         endcase
     endfunction
 
+    function logic check_writeback(stage current_stage, logic writeback_enable);
+        if (current_stage == stage_writeback && writeback_enable) begin
+            return 1;
+        end else begin
+            return 0;
+        end
+    endfunction
+
 
     function reg_data_t execute_instr(instr_select_t curr_instr_select, reg_data_t rs1_data, reg_data_t rs2_data);
         case (curr_instr_select)
@@ -336,7 +355,7 @@ module core (
     endfunction
 
     function reg_data_t execute_sra(reg_data_t rs1, reg_data_t rs2);
-        return rs1 >>> rs2;
+        return $signed(rs1) >>> $signed(rs2);
     endfunction
 
     function reg_data_t execute_slt(reg_data_t rs1, reg_data_t rs2);
@@ -348,7 +367,7 @@ module core (
     endfunction
 
     function reg_data_t execute_addi(i_type_t instr, reg_data_t rs1);
-        return rs1 + {{20{instr.imm[11]}}, instr.imm[11:0]}; // Sign-extended immediate value
+        return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm[11:0]}); // Sign-extended immediate value
     endfunction
 
     function reg_data_t execute_andi(i_type_t instr, reg_data_t rs1);
@@ -380,7 +399,7 @@ module core (
     endfunction
 
     function reg_data_t execute_srai(i_type_t instr, reg_data_t rs1);
-        return rs1 >>> instr.imm[4:0]; // [4:0] shamt
+        return $signed(rs1) >>> instr.imm[4:0]; // [4:0] shamt
     endfunction
 
     // function void execute_lb(i_type_t instr);
