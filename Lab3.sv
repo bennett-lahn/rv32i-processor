@@ -60,6 +60,10 @@ module core (
     // if true, rd_data_to_writeback needs to be written to register file
     logic writeback_enable;
 
+    // Register used for store instructions
+    // Stores rs2 value to be sent to memory
+    reg_data_t store_data_reg;
+
     // Continuously update register read based on current instruction rs1/rs2
     // This means rs1/rs2 addresses ONLY VALID FOR EXECUTE STAGE
     assign register_io.read_reg_addr_1 = update_rs1_addr(reg_instr_data);
@@ -109,25 +113,31 @@ module core (
     // Data memory request logic for execute, mem stage
     // Load and store for a type must be naturally aligned to the respective datatype
     // (i.e. the effective address is not divisible by the size of the access in bytes)
-    // TODO: Update for store instructions
-    // TODO: ignore load instructions to x0
-    // TODO: Double-check to make sure x0 register handled properly
     always_comb begin
         if (current_stage == stage_mem && curr_instr_select >= I_LB && curr_instr_select <= I_LHU) begin
             data_mem_req.valid = 1;
             data_mem_req.addr = rd_data_to_writeback; // Calculated memory addr in EXECUTE
+            data_mem_req.data = REG_ZERO_VAL;
             case (curr_instr_select)
-                I_LB:  memory_io_req.do_read = 4'b0001;
-                I_LH:  memory_io_req.do_read = 4'b0011;
-                I_LW:  memory_io_req.do_read = 4'b1111;
-                I_LBU: memory_io_req.do_read = 4'b0001;
-                I_LHU: memory_io_req.do_read = 4'b0011;
-                default: memory_io_req.do_read = 4'b0000; // Should never happen
+                I_LB:    data_mem_req.do_read = 4'b0001;
+                I_LH:    data_mem_req.do_read = 4'b0011;
+                I_LW:    data_mem_req.do_read = 4'b1111;
+                I_LBU:   data_mem_req.do_read = 4'b0001;
+                I_LHU:   data_mem_req.do_read = 4'b0011;
+                default: data_mem_req.do_read = 4'b0000; // Should never happen
             endcase
             data_mem_req.do_write = 4'b0000;
         end else if (current_stage == stage_mem && curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin
             data_mem_req.valid = 1;
-            // TODO: implement store
+            data_mem_req.addr = rd_data_to_writeback;
+            data_mem_req.data = store_data_reg;
+            data_mem_req.do_read = 4'b0000;
+            case (curr_instr_select)
+                S_SB:    data_mem_req.do_write = 4'b0001;
+                S_SH:    data_mem_req.do_write = 4'b0011;
+                S_SW:    data_mem_req.do_write = 4'b1111;
+                default: data_mem_req.do_write = 4'b0000; // Should never happen
+            endcase
         end else begin
             data_mem_req.valid = 0;
             data_mem_req.addr = 0;
@@ -145,6 +155,7 @@ module core (
             rd_data_to_writeback <= REG_ZERO_VAL;
             rd_writeback_addr <= REG_ZERO;
             writeback_enable <= 1'b0;
+            store_data_reg <= REG_ZERO_VAL;
         end else begin
             case (current_stage)
                 stage_fetch: begin
@@ -170,29 +181,30 @@ module core (
                     $display("[EXECUTE] Executing instruction %s", curr_instr_select.name());
                     $display("[EXECUTE] If valid: rs1 val %d, rs2 val %d, imm val %d", curr_instr_data.r_type.rs1, curr_instr_data.r_type.rs2, $signed(curr_instr_data.i_type.imm));
 
-                    rd_data_to_writeback <= execute_instr(curr_instr_select, rs1_data, rs2_data);
-
-                    rd_writeback_addr <= curr_instr_data.r_type.rd; // All types use same rd bit location in instr
-
                     // Only writeback for appropriate instructions
                     writeback_enable <= (curr_instr_select < S_SB || curr_instr_select > B_BGEU) ? 1 : 0;
+                    rd_data_to_writeback <= execute_instr(curr_instr_select, rs1_data, rs2_data);
+                    rd_writeback_addr <= curr_instr_data.r_type.rd; // All types use same rd bit location in instr
 
+                    // If store instruction, store data of rs2 for memory write
+                    if (curr_instr_select >= S_SB && curr_instr_select <= S_SW)
+                        store_data_reg <= rs2_data;
+                    
                     $display("[STAGE] Transitioning to MEM");
                 end
                 stage_mem: begin
                     // If instruction is load, we need to update rd_data_to_writeback using data read from memory
-                    // MUST WAIT FOR MEMORY TO BE READ/WRITTEN (TODO: Do we have to wait for a memory write?)
                     $display("[EXECUTE] Got result %d to return to reg %d", $signed(rd_data_to_writeback), rd_writeback_addr);
 
                     // Handle memory read or write, otherwise continue to writeback
-                    if (curr_instr_select >= I_LB && curr_instr_select <= I_LHU) begin
+                    if (curr_instr_select >= I_LB && curr_instr_select <= I_LHU) begin // If reading
                         if (data_mem_rsp.valid == 1) begin
                             current_stage <= stage_writeback;
-                            rd_data_to_writeback <= read_memory(curr_instr_select, memory_io_rsp);
+                            rd_data_to_writeback <= interpret_read_memory_rsp(curr_instr_select, data_mem_rsp);
                         end else begin
                             current_stage <= stage_mem;
                         end
-                    end else if (curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin
+                    end else if (curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin // If writing
                         if (data_mem_rsp.valid == 1) begin
                             current_stage <= stage_writeback;
                         end else begin
@@ -519,14 +531,17 @@ module core (
     // function void execute_jalr(i_type_t instr, reg_file_io_t register_io);
     // endfunction
 
-    // function void execute_sb(s_type_t instr);
-    // endfunction
+    function reg_data_t execute_sb(s_type_t instr);
+        return rs1 + $signed(instr.imm);
+    endfunction
 
-    // function void execute_sh(s_type_t instr);
-    // endfunction
+    function reg_data_t execute_sh(s_type_t instr);
+        return rs1 + $signed(instr.imm);
+    endfunction
 
-    // function void execute_sw(s_type_t instr);
-    // endfunction
+    function reg_data_t execute_sw(s_type_t instr);
+        return rs1 + $signed(instr.imm);
+    endfunction
 
     // function void execute_beq(b_type_t instr);
     // endfunction
@@ -558,14 +573,14 @@ module core (
     // endfunction
 
     // Given current load instruction memory rsp, return sign/zero extended memory response according to instruction
-    function reg_data_t read_memory(instr_select_t curr_instr_select, memory_io_rsp32 memory_io_rsp);
+    function reg_data_t interpret_read_memory_rsp(instr_select_t curr_instr_select, memory_io_rsp32 data_mem_rsp);
         case (curr_instr_select)
-            I_LB:     return {24{memory_io_rsp.data[7]}, memory_io_rsp[7:0]};
-            I_LH:     return {16{memory_io_rsp.data[15]}, memory_io_rsp[15:0]};
-            I_LW:     return memory_io_rsp.data;
-            I_LBU:    return {24{1'b0}, memory_io_rsp[7:0]};
-            I_LHU:    return {16{1'b0}, memory_io_rsp[15:0]};
-            default:  return memory_io_rsp.data; // Should never happen
+            I_LB:     return {24{data_mem_rsp.data[7]}, data_mem_rsp[7:0]};
+            I_LH:     return {16{data_mem_rsp.data[15]}, data_mem_rsp[15:0]};
+            I_LW:     return data_mem_rsp.data;
+            I_LBU:    return {24{1'b0}, data_mem_rsp[7:0]};
+            I_LHU:    return {16{1'b0}, data_mem_rsp[15:0]};
+            default:  return data_mem_rsp.data; // Should never happen
         endcase
     endfunction
 
