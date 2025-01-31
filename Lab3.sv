@@ -61,6 +61,7 @@ module core (
     logic writeback_enable;
 
     // Continuously update register read based on current instruction rs1/rs2
+    // This means rs1/rs2 addresses ONLY VALID FOR EXECUTE STAGE
     assign register_io.read_reg_addr_1 = update_rs1_addr(reg_instr_data);
     assign register_io.read_reg_addr_2 = update_rs2_addr(reg_instr_data);
     assign register_io.write_reg_addr = rd_writeback_addr;
@@ -80,29 +81,6 @@ module core (
         ,.read_data_2(register_io.read_data_2)
     );
 
-    // Memory request logic for fetch, mem stage
-    always_comb begin
-        if (current_stage == stage_fetch) begin
-            instr_mem_req.valid = 1;
-            instr_mem_req.addr = pc;
-            instr_mem_req.do_read  = 4'b1111;
-            instr_mem_req.do_write = 4'b0000;
-        end else if (current_stage == stage_mem) begin
-            // Do things
-            instr_mem_req.valid = 0;
-            instr_mem_req.addr = pc;
-            instr_mem_req.do_read  = 4'b0000;
-            instr_mem_req.do_write = 4'b0000;
-            instr_mem_req.valid = 0;
-        end else begin
-            instr_mem_req.valid = 0;
-            instr_mem_req.addr = pc;
-            instr_mem_req.do_read  = 4'b0000;
-            instr_mem_req.do_write = 4'b0000;
-            instr_mem_req.valid = 0;
-        end
-    end
-
     // Program counter control
     always @(posedge clk) begin
        if (reset)
@@ -110,6 +88,52 @@ module core (
 
        if (current_stage == stage_writeback)
           pc <= pc + 4;
+    end
+
+    // Instruction memory request logic for fetch stage
+    // Instruction memory response ONLY VALID FOR DECODE STAGE
+    always_comb begin
+        if (current_stage == stage_fetch) begin
+            instr_mem_req.valid = 1;
+            instr_mem_req.addr = pc;
+            instr_mem_req.do_read  = 4'b1111;
+            instr_mem_req.do_write = 4'b0000;
+        end else begin
+            instr_mem_req.valid = 0;
+            instr_mem_req.addr = pc;
+            instr_mem_req.do_read  = 4'b0000;
+            instr_mem_req.do_write = 4'b0000;
+        end
+    end
+
+    // Data memory request logic for execute, mem stage
+    // Load and store for a type must be naturally aligned to the respective datatype
+    // (i.e. the effective address is not divisible by the size of the access in bytes)
+    // TODO: Update for store instructions
+    // TODO: ignore load instructions to x0
+    // TODO: Double-check to make sure x0 register handled properly
+    always_comb begin
+        if (current_stage == stage_mem && curr_instr_select >= I_LB && curr_instr_select <= I_LHU) begin
+            data_mem_req.valid = 1;
+            data_mem_req.addr = rd_data_to_writeback; // Calculated memory addr in EXECUTE
+            case (curr_instr_select)
+                I_LB:  memory_io_req.do_read = 4'b0001;
+                I_LH:  memory_io_req.do_read = 4'b0011;
+                I_LW:  memory_io_req.do_read = 4'b1111;
+                I_LBU: memory_io_req.do_read = 4'b0001;
+                I_LHU: memory_io_req.do_read = 4'b0011;
+                default: memory_io_req.do_read = 4'b0000; // Should never happen
+            endcase
+            data_mem_req.do_write = 4'b0000;
+        end else if (current_stage == stage_mem && curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin
+            data_mem_req.valid = 1;
+            // TODO: implement store
+        end else begin
+            data_mem_req.valid = 0;
+            data_mem_req.addr = 0;
+            data_mem_req.do_read = 4'b0000;
+            data_mem_req.do_write = 4'b0000;
+        end
     end
 
     // Processor control flow for stage change, data path
@@ -142,17 +166,41 @@ module core (
                 end
                 stage_execute: begin
                     current_stage <= stage_mem;
+
                     $display("[EXECUTE] Executing instruction %s", curr_instr_select.name());
                     $display("[EXECUTE] If valid: rs1 val %d, rs2 val %d, imm val %d", curr_instr_data.r_type.rs1, curr_instr_data.r_type.rs2, $signed(curr_instr_data.i_type.imm));
+
                     rd_data_to_writeback <= execute_instr(curr_instr_select, rs1_data, rs2_data);
-                    rd_writeback_addr <= curr_instr_data.r_type.rd; // All types use same rd bits
+
+                    rd_writeback_addr <= curr_instr_data.r_type.rd; // All types use same rd bit location in instr
+
                     // Only writeback for appropriate instructions
                     writeback_enable <= (curr_instr_select < S_SB || curr_instr_select > B_BGEU) ? 1 : 0;
+
                     $display("[STAGE] Transitioning to MEM");
                 end
                 stage_mem: begin
+                    // If instruction is load, we need to update rd_data_to_writeback using data read from memory
+                    // MUST WAIT FOR MEMORY TO BE READ/WRITTEN (TODO: Do we have to wait for a memory write?)
                     $display("[EXECUTE] Got result %d to return to reg %d", $signed(rd_data_to_writeback), rd_writeback_addr);
-                    current_stage <= stage_writeback;
+
+                    // Handle memory read or write, otherwise continue to writeback
+                    if (curr_instr_select >= I_LB && curr_instr_select <= I_LHU) begin
+                        if (data_mem_rsp.valid == 1) begin
+                            current_stage <= stage_writeback;
+                            rd_data_to_writeback <= read_memory(curr_instr_select, memory_io_rsp);
+                        end else begin
+                            current_stage <= stage_mem;
+                        end
+                    end else if (curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin
+                        if (data_mem_rsp.valid == 1) begin
+                            current_stage <= stage_writeback;
+                        end else begin
+                            current_stage <= stage_mem
+                        end
+                    end else begin
+                        current_stage <= stage_writeback;
+                    end
                     $display("[STAGE] Transitioning to WRITEBACK");
                 end
                 stage_writeback: begin
@@ -175,11 +223,11 @@ module core (
         case (instr_type)
             INSTR_R_TYPE: return decode_r_type(instr.r_type);
             INSTR_I_TYPE: return decode_i_type(instr.i_type);
-            // INSTR_S_TYPE: return decode_s_type(instr.s_type);
+            INSTR_S_TYPE: return decode_s_type(instr.s_type);
             // INSTR_B_TYPE: return decode_b_type(instr.b_type);
-            // INSTR_U_TYPE: return decode_u_type(instr.u_type);
+            INSTR_U_TYPE: return decode_u_type(instr.u_type);
             // INSTR_J_TYPE: return decode_j_type(instr.j_type);
-            default: return X_UNKNOWN; // TODO: Add function returning correct type
+            default: return X_UNKNOWN;
         endcase
     endfunction
 
@@ -202,30 +250,75 @@ module core (
     // Decodes and executes appropriate R-type instruction given r_type_t input
     function instr_select_t decode_r_type(r_type_t instr);
         case (instr.funct3)
-            FUNCT3_ADD_SUB: return instr_select_t'((instr.funct7 == FUNCT7_ADD) ? R_ADD : (instr.funct7 == FUNCT7_SUB) ? R_SUB : X_UNKNOWN);
+            FUNCT3_ADD_SUB: begin
+                return instr_select_t'((instr.funct7 == FUNCT7_ADD) ? R_ADD : 
+                                       (instr.funct7 == FUNCT7_SUB) ? R_SUB : X_UNKNOWN);
+            end
             FUNCT3_AND:     return R_AND;
             FUNCT3_OR:      return R_OR;
             FUNCT3_XOR:     return R_XOR;
             FUNCT3_SLL:     return R_SLL;
-            FUNCT3_SRL_SRA: return instr_select_t'((instr.funct7 == FUNCT7_SRL) ? R_SRL : (instr.funct7 == FUNCT7_SRA) ? R_SRA : X_UNKNOWN);
+            FUNCT3_SRL_SRA: begin 
+                return instr_select_t'((instr.funct7 == FUNCT7_SRL) ? R_SRL : 
+                                       (instr.funct7 == FUNCT7_SRA) ? R_SRA : X_UNKNOWN);
+            end
             FUNCT3_SLT:     return R_SLT;
             FUNCT3_SLTU:    return R_SLTU;
             default:        return X_UNKNOWN; // Handle unknown instructions by doing nothing
         endcase
     endfunction
 
-    // Decodes and executes appropriate I-type instruction given i_type_t input
+    // Decodes appropriate I-type instruction given i_type_t input
+    // FUNCT3 names are not to be taken literally in this case statement since 
+    // multiple i-type instructions share funct3
     function instr_select_t decode_i_type(i_type_t instr);
         case (instr.funct3)
-            FUNCT3_ADDI:     return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_ADDI : (instr.opcode == OPCODE_JALR) ? I_JALR : X_UNKNOWN);
-            FUNCT3_SLLI:     return instr_select_t'((instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SLLI) ? I_SLLI : X_UNKNOWN);
-            FUNCT3_SRLI:     return instr_select_t'((instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRLI) ? I_SRLI : (instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRAI) ? I_SRAI : X_UNKNOWN);
-            FUNCT3_SLTI:     return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_SLTI : X_UNKNOWN);
-            FUNCT3_XORI:     return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_XORI : X_UNKNOWN);
+            FUNCT3_ADDI: begin     
+                return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_ADDI : 
+                                       (instr.opcode == OPCODE_JALR) ? I_JALR : 
+                                       (instr.opcode == OPCODE_LOAD) ? I_LB : X_UNKNOWN);
+        end
+            FUNCT3_SLLI: begin
+                return instr_select_t'((instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SLLI) ? I_SLLI : 
+                                       (instr.opcode == OPCODE_LOAD) ? I_LH : X_UNKNOWN);
+        end
+            FUNCT3_SRLI: begin    
+                return instr_select_t'((instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRLI) ? I_SRLI : 
+                                       (instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRAI) ? I_SRAI : 
+                                       (instr.opcode == OPCODE_LOAD) ? I_LHU : X_UNKNOWN);
+
+        end
+            FUNCT3_SLTI: begin
+                return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_SLTI :
+                                       (instr.opcode == OPCODE_LOAD) ? I_LW : X_UNKNOWN);
+        end
+            FUNCT3_XORI: begin
+                return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_XORI : 
+                                       (instr.opcode == OPCODE_LOAD) ? I_LBU : X_UNKNOWN);
+        end
             FUNCT3_ANDI:     return I_ANDI;
             FUNCT3_ORI:      return I_ORI;
             FUNCT3_SLTIU:    return I_SLTIU;
             default:         return X_UNKNOWN; // Handle unsupported instructions
+        endcase
+    endfunction
+
+    // Decodes s-type instructon given s_type_t instr input
+    function instr_select_t decode_s_type(s_type_t instr);
+        case (instr.funct3)
+            FUNCT3_SB: return S_SB;
+            FUNCT3_SH: return S_SH;
+            FUNCT3_SW: return S_SW;
+            default:   return X_UNKNOWN;
+        endcase
+    endfunction
+
+    // Decodes u-type instruction given u_type_t instr input
+    function instr_select_t decode_u_type(u_type_t instr);
+        case (instr.opcode)
+            OPCODE_LUI:     return U_LUI;
+            OPCODE_AUIPC:   return U_AUIPC;
+            default:        return X_UNKNOWN
         endcase
     endfunction
 
@@ -237,9 +330,9 @@ module core (
         case (reg_load_type)
             INSTR_R_TYPE: return reg_instr_data.r_type.rs1;
             INSTR_I_TYPE: return reg_instr_data.i_type.rs1;
-            // INSTR_S_TYPE: return decode_s_type(instr.s_type);
+            INSTR_S_TYPE: return reg_instr_data.s_type.rs1;
             // INSTR_B_TYPE: return decode_b_type(instr.b_type);
-            // INSTR_U_TYPE: return decode_u_type(instr.u_type);
+            INSTR_U_TYPE: return REG_ZERO;
             // INSTR_J_TYPE: return decode_j_type(instr.j_type);
             default: return REG_ZERO;
         endcase
@@ -253,9 +346,9 @@ module core (
         case (reg_load_type)
             INSTR_R_TYPE: return reg_instr_data.r_type.rs2;
             INSTR_I_TYPE: return REG_ZERO;
-            // INSTR_S_TYPE: return decode_s_type(instr.s_type);
+            INSTR_S_TYPE: return reg_instr_data.s_type.rs2;
             // INSTR_B_TYPE: return decode_b_type(instr.b_type);
-            // INSTR_U_TYPE: return decode_u_type(instr.u_type);
+            INSTR_U_TYPE: return REG_ZERO;
             // INSTR_J_TYPE: return decode_j_type(instr.j_type);
             default: return REG_ZERO;
         endcase
@@ -269,7 +362,6 @@ module core (
             return 0;
         end
     endfunction
-
 
     function reg_data_t execute_instr(instr_select_t curr_instr_select, reg_data_t rs1_data, reg_data_t rs2_data);
         case (curr_instr_select)
@@ -294,15 +386,15 @@ module core (
             I_ANDI: return execute_andi(curr_instr_data.i_type, rs1_data);
             I_ORI:  return execute_ori(curr_instr_data.i_type, rs1_data);
             I_SLTIU:return execute_sltiu(curr_instr_data.i_type, rs1_data);
-            // I_LB:
-            // I_LH:
-            // I_LW:
-            // I_LBU:
-            // I_LHU:
+            I_LB:   return execute_lb(curr_instr_data.i_type, rs1_data);
+            I_LH:   return execute_lh(curr_instr_data.i_type, rs1_data);
+            I_LW:   return execute_lw(curr_instr_data.i_type, rs1_data);
+            I_LBU:  return execute_lbu(curr_instr_data.i_type, rs1_data);
+            I_LHU:  return execute_lhu(curr_instr_data.i_type, rs1_data);
 
-            // S_SB:
-            // S_SH:
-            // S_SW:
+            S_SB:   return
+            S_SH:   return
+            S_SW:   return
 
             // B_BEQ:
             // B_BNE:
@@ -311,8 +403,8 @@ module core (
             // B_BLTU:
             // B_BGEU:
 
-            // U_LUI:
-            // U_AUIPC:
+            U_LUI:  return execute_lui(curr_instr_data.u_type);
+            U_AUIPC:return execute_auipc(curr_instr_data.u_type, pc);
 
             // J_JAL:
 
@@ -325,7 +417,7 @@ module core (
     // Output: data to be stored in rd register, if applicable
 
     function reg_data_t execute_unknown();
-        return 32'd0;
+        return REG_ZERO_VAL;
     endfunction
 
     function reg_data_t execute_add(reg_data_t rs1, reg_data_t rs2);
@@ -361,11 +453,11 @@ module core (
     endfunction
 
     function reg_data_t execute_slt(reg_data_t rs1, reg_data_t rs2);
-        return $signed(rs1) < $signed(rs2) ? 32'd1 : 32'd0;
+        return $signed(rs1) < $signed(rs2) ? REG_ONE_VAL : REG_ZERO_VAL;
     endfunction
 
     function reg_data_t execute_sltu(reg_data_t rs1, reg_data_t rs2);
-        return rs1 < rs2 ? 32'd1 : 32'd0;
+        return rs1 < rs2 ? REG_ONE_VAL : REG_ZERO_VAL;
     endfunction
 
     function reg_data_t execute_addi(i_type_t instr, reg_data_t rs1);
@@ -385,11 +477,11 @@ module core (
     endfunction
 
     function reg_data_t execute_slti(i_type_t instr, reg_data_t rs1);
-        return ($signed(rs1) < $signed({{20{instr.imm[11]}}, instr.imm[11:0]})) ? 32'd1 : 32'd0;
+        return ($signed(rs1) < $signed({{20{instr.imm[11]}}, instr.imm[11:0]})) ? REG_ONE_VAL : REG_ZERO_VAL;
     endfunction
 
     function reg_data_t execute_sltiu(i_type_t instr, reg_data_t rs1);
-        return (rs1 < {{20{instr.imm[11]}}, instr.imm[11:0]}) ? 32'd1 : 32'd0;
+        return (rs1 < {{20{instr.imm[11]}}, instr.imm[11:0]}) ? REG_ONE_VAL : REG_ZERO_VAL;
     endfunction
 
     function reg_data_t execute_slli(i_type_t instr, reg_data_t rs1);
@@ -404,20 +496,25 @@ module core (
         return $signed(rs1) >>> instr.imm[4:0]; // [4:0] shamt
     endfunction
 
-    // function void execute_lb(i_type_t instr);
-    // endfunction
+    function reg_data_t execute_lb(i_type_t instr);
+        return rs1 + $signed(instr.imm);
+    endfunction
 
-    // function void execute_lh(i_type_t instr);
-    // endfunction
+    function reg_data_t execute_lh(i_type_t instr);
+        return rs1 + $signed(instr.imm);
+    endfunction
 
-    // function void execute_lw(i_type_t instr);
-    // endfunction
+    function reg_data_t execute_lw(i_type_t instr, reg_data_t rs1);
+        return rs1 + $signed(instr.imm);
+    endfunction
 
-    // function void execute_lbu(i_type_t instr);
-    // endfunction
+    function reg_data_t execute_lbu(i_type_t instr, reg_data_t rs1);
+        return rs1 + $signed(instr.imm); 
+    endfunction
 
-    // function void execute_lhu(i_type_t instr);
-    // endfunction
+    function reg_data_t execute_lhu(i_type_t instr, reg_data_t rs1);
+        return rs1 + $signed(instr.imm);
+    endfunction
 
     // function void execute_jalr(i_type_t instr, reg_file_io_t register_io);
     // endfunction
@@ -449,14 +546,28 @@ module core (
     // function void execute_bgeu(b_type_t instr);
     // endfunction
 
-    // function void execute_lui(u_type_t instr);
-    // endfunction
+    function reg_data_t execute_lui(u_type_t instr); // TODO: Remove magic numbers for sign extension
+        return {instr.imm, 12{1'b0}};
+    endfunction
 
-    // function void execute_auipc(u_type_t instr);
-    // endfunction
+    function reg_data_t execute_auipc(u_type_t instr, word pc); // TODO: Remove magic numbers for sign extension
+        return pc + {instr.imm, 12{1'b0}}; 
+    endfunction
 
     // function void execute_jal(j_type_t instr);
     // endfunction
+
+    // Given current load instruction memory rsp, return sign/zero extended memory response according to instruction
+    function reg_data_t read_memory(instr_select_t curr_instr_select, memory_io_rsp32 memory_io_rsp);
+        case (curr_instr_select)
+            I_LB:     return {24{memory_io_rsp.data[7]}, memory_io_rsp[7:0]};
+            I_LH:     return {16{memory_io_rsp.data[15]}, memory_io_rsp[15:0]};
+            I_LW:     return memory_io_rsp.data;
+            I_LBU:    return {24{1'b0}, memory_io_rsp[7:0]};
+            I_LHU:    return {16{1'b0}, memory_io_rsp[15:0]};
+            default:  return memory_io_rsp.data; // Should never happen
+        endcase
+    endfunction
 
 endmodule
 
