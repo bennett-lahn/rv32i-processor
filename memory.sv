@@ -91,3 +91,7 @@ endmodule
 // second least significant byte goes in second address
 // Least significant byte of read byte select is LSB of memory word, 4'b001 <-- Write to only LSB
 // req.do_write[0] is LSB of 4'bXXXX
+
+// For reads:
+// Must overwrite bytes that are not supposed to be included in read
+// This is accomplished by interpret_read_memory_rsp

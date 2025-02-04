@@ -109,6 +109,8 @@ module core (
         end
     end
 
+    // Idea: What if writing/reading is not working because setting byte plane to 0110 expects the data to be in 
+    // 0110 bits of the request data as well (i.e., system does not know to move bits from LSB, LSB+1 into middle two bytes)
 
     // TODO: This data memory read/write DOES NOT work as written
     // Memory automatically aligns given address by dropping the lowest two bits
@@ -123,14 +125,14 @@ module core (
             data_mem_req.valid = 1;
             data_mem_req.addr = rd_data_to_writeback; // Calculated memory addr in EXECUTE
             data_mem_req.data = REG_ZERO_VAL;
-            data_mem_req.do_read = calculate_mem_offset(curr_instr_select, rd_data_to_writeback);
+            data_mem_req.do_read = create_byte_plane(curr_instr_select, rd_data_to_writeback);
             data_mem_req.do_write = 4'b0000;
         end else if (current_stage == stage_mem && curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin
             data_mem_req.valid = 1;
             data_mem_req.addr = rd_data_to_writeback;
-            data_mem_req.data = store_data_reg;
+            data_mem_req.data = write_shift_data_by_offset(curr_instr_select, rd_data_to_writeback, store_data_reg);
             data_mem_req.do_read = 4'b0000;
-            data_mem_req.do_write = calculate_mem_offset(curr_instr_select, rd_data_to_writeback);
+            data_mem_req.do_write = create_byte_plane(curr_instr_select, rd_data_to_writeback);
         end else begin
             data_mem_req.valid = 0;
             data_mem_req.addr = 0;
@@ -193,7 +195,6 @@ module core (
                     if (curr_instr_select >= I_LB && curr_instr_select <= I_LHU) begin // If reading
                         if (data_mem_rsp.valid == 1) begin
                             $display("[MEM] Got successful read from address 0x%h", data_mem_rsp.addr);
-                            $display("[MEM] Read data: %d (s) %d (u)", $signed(data_mem_rsp.data), data_mem_rsp.data);
                             $display("[STAGE] Transitioning to WRITEBACK");
                             current_stage <= stage_writeback;
                             rd_data_to_writeback <= interpret_read_memory_rsp(curr_instr_select, data_mem_rsp);
@@ -571,13 +572,14 @@ module core (
     // function void execute_jal(j_type_t instr);
     // endfunction
 
-    // Calculate & return which bytes should be read from memory after 4-byte aligning memory address request
-    // Subtract true address from aligned address to get offset to select byte plane
-    function logic [3:0] calculate_mem_offset(instr_select_t curr_instr_select, reg_data_t rd_data_to_writeback);
-        logic [31:0] aligned_addr;
+    // The functions below manipulate memory read/writes by calculating the misalignment between the 4-byte aligned
+    // main memory and the requested read/write appropriately shifting data so it is written to the appropriate byte
+    // planes or moved into the least significant bytes
+
+    // Return which bytes should be read from memory after 4-byte aligning memory address request
+    function logic [3:0] create_byte_plane(instr_select_t curr_instr_select, reg_data_t mem_addr);
         mem_offset_t byte_offset;
-        aligned_addr = {rd_data_to_writeback[31:2], 2'd0}; // Drop lowest 2 bits for alignment
-        byte_offset = mem_offset_t'(rd_data_to_writeback - aligned_addr); // Cast may be problematic; should never fall outside of enum
+        byte_offset = calculate_mem_offset(rd_data_to_writeback);
         $display("[MEM] Calculated misalignment for byte plane is %d for addr 0x%h", byte_offset, data_mem_req.addr);
         if (curr_instr_select == I_LW || curr_instr_select == S_SW) begin
             return 4'b1111;
@@ -601,15 +603,58 @@ module core (
         end
     endfunction
 
+    // Shift data into appropriate bytes depending on which byte planes are going to be written to
+    function reg_data_t write_shift_data_by_offset(instr_select_t curr_instr_select, reg_data_t mem_addr, reg_data_t data);
+        logic [3:0] byte_plane;
+        byte_plane = create_byte_plane(curr_instr_select, mem_addr);
+        case (byte_plane)
+            4'b0001: return data;
+            4'b0010: return data << BYTE;
+            4'b0100: return data << 2*BYTE;
+            4'b1000: return data << 3*BYTE;
+            4'b0011: return data;
+            4'b0110: return data << BYTE;
+            4'b1100: return data << 2*BYTE;
+            default: return data;
+        endcase
+    endfunction
+
+    // Shift data into lowest bytes depending on which byte planes were read by memory, return shifted value
+    function reg_data_t read_shift_data_by_offset(instr_select_t curr_instr_select, reg_data_t mem_addr, reg_data_t data);
+        logic [3:0] byte_plane;
+        byte_plane = create_byte_plane(curr_instr_select, mem_addr);
+        case (byte_plane)
+            4'b0001: return data;
+            4'b0010: return data >> BYTE;
+            4'b0100: return data >> 2*BYTE; 
+            4'b1000: return data >> 3*BYTE;
+            4'b0011: return data;
+            4'b0110: return data >> BYTE;
+            4'b1100: return data >> 2*BYTE;
+            default: return data;
+        endcase
+    endfunction
+
+    // Helper function that compares memory address to 4-byte aligned version and returns numerical difference between the two
+    // Subtract true address from aligned address to get offset to select byte plane
+    function mem_offset_t calculate_mem_offset(reg_data_t unaligned_addr);
+        logic [31:0] aligned_addr;
+        aligned_addr = {unaligned_addr[31:2], 2'd0}; // Drop lowest 2 bits for alignment
+        return mem_offset_t'(unaligned_addr - aligned_addr); // Cast may be problematic; should never fall outside of enum
+    endfunction
+
     // Given current load instruction memory rsp, return sign/zero extended memory response according to instruction
     function reg_data_t interpret_read_memory_rsp(instr_select_t curr_instr_select, memory_io_rsp32 data_mem_rsp);
+        reg_data_t temp;
+        // Call shift data to move rsp data into proper LSB(s)
+        temp = read_shift_data_by_offset(curr_instr_select, data_mem_rsp.addr, data_mem_rsp.data);
         case (curr_instr_select)
-            I_LB:     return reg_data_t'({{24{data_mem_rsp.data[7]}}, data_mem_rsp.data[7:0]});
-            I_LH:     return reg_data_t'({{16{data_mem_rsp.data[15]}}, data_mem_rsp.data[15:0]});
-            I_LW:     return data_mem_rsp.data;
-            I_LBU:    return reg_data_t'({{24{1'b0}}, data_mem_rsp.data[7:0]});
-            I_LHU:    return reg_data_t'({{16{1'b0}}, data_mem_rsp.data[15:0]});
-            default:  return data_mem_rsp.data; // Should never happen
+            I_LB:     return reg_data_t'({{24{temp[7]}}, temp[7:0]});
+            I_LH:     return reg_data_t'({{16{temp[15]}}, temp[15:0]});
+            I_LW:     return temp;
+            I_LBU:    return reg_data_t'({{24{1'b0}}, temp[7:0]});
+            I_LHU:    return reg_data_t'({{16{1'b0}}, temp[15:0]});
+            default:  return temp; // Should never happen
         endcase
     endfunction
 
