@@ -1,6 +1,5 @@
 `ifndef _core_v
 `define _core_v
-`include "system.sv"
 `include "base.sv"
 `include "memory_io.sv"
 `include "memory.sv"
@@ -110,6 +109,12 @@ module core (
         end
     end
 
+
+    // TODO: This data memory read/write DOES NOT work as written
+    // Memory automatically aligns given address by dropping the lowest two bits
+    // Therefore, we need to figure out which byte plane to activate/where to put data/half words by looking at the diff
+    // between the actual address and the aligned address with bits dropped
+
     // Data memory request logic for execute, mem stage
     // Load and store for a type must be naturally aligned to the respective datatype
     // (i.e. the effective address is not divisible by the size of the access in bytes)
@@ -118,26 +123,14 @@ module core (
             data_mem_req.valid = 1;
             data_mem_req.addr = rd_data_to_writeback; // Calculated memory addr in EXECUTE
             data_mem_req.data = REG_ZERO_VAL;
-            case (curr_instr_select)
-                I_LB:    data_mem_req.do_read = 4'b0001;
-                I_LH:    data_mem_req.do_read = 4'b0011;
-                I_LW:    data_mem_req.do_read = 4'b1111;
-                I_LBU:   data_mem_req.do_read = 4'b0001;
-                I_LHU:   data_mem_req.do_read = 4'b0011;
-                default: data_mem_req.do_read = 4'b0000; // Should never happen
-            endcase
+            data_mem_req.do_read = calculate_mem_offset(curr_instr_select, rd_data_to_writeback);
             data_mem_req.do_write = 4'b0000;
         end else if (current_stage == stage_mem && curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin
             data_mem_req.valid = 1;
             data_mem_req.addr = rd_data_to_writeback;
             data_mem_req.data = store_data_reg;
             data_mem_req.do_read = 4'b0000;
-            case (curr_instr_select)
-                S_SB:    data_mem_req.do_write = 4'b0001;
-                S_SH:    data_mem_req.do_write = 4'b0011;
-                S_SW:    data_mem_req.do_write = 4'b1111;
-                default: data_mem_req.do_write = 4'b0000; // Should never happen
-            endcase
+            data_mem_req.do_write = calculate_mem_offset(curr_instr_select, rd_data_to_writeback);
         end else begin
             data_mem_req.valid = 0;
             data_mem_req.addr = 0;
@@ -189,16 +182,19 @@ module core (
                     // If store instruction, store data of rs2 for memory write
                     if (curr_instr_select >= S_SB && curr_instr_select <= S_SW)
                         store_data_reg <= rs2_data;
-                    
                     $display("[STAGE] Transitioning to MEM");
                 end
                 stage_mem: begin
                     // If instruction is load, we need to update rd_data_to_writeback using data read from memory
-                    $display("[EXECUTE] Got result %d to return to reg %d", $signed(rd_data_to_writeback), rd_writeback_addr);
+                    if (curr_instr_select < I_LB || curr_instr_select > S_SW)
+                        $display("[EXECUTE] Got result %d to return to reg %d", $signed(rd_data_to_writeback), rd_writeback_addr);
 
                     // Handle memory read or write, otherwise continue to writeback
                     if (curr_instr_select >= I_LB && curr_instr_select <= I_LHU) begin // If reading
                         if (data_mem_rsp.valid == 1) begin
+                            $display("[MEM] Got successful read from address 0x%h", data_mem_rsp.addr);
+                            $display("[MEM] Read data: %d (s) %d (u)", $signed(data_mem_rsp.data), data_mem_rsp.data);
+                            $display("[STAGE] Transitioning to WRITEBACK");
                             current_stage <= stage_writeback;
                             rd_data_to_writeback <= interpret_read_memory_rsp(curr_instr_select, data_mem_rsp);
                         end else begin
@@ -206,14 +202,16 @@ module core (
                         end
                     end else if (curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin // If writing
                         if (data_mem_rsp.valid == 1) begin
+                            $display("[MEM] Successfully wrote to address 0x%h", data_mem_rsp.addr);
                             current_stage <= stage_writeback;
                         end else begin
-                            current_stage <= stage_mem
+                            current_stage <= stage_mem;
+                            $display("[MEM] Waiting on write to 0x%h, byte plane %b", data_mem_req.addr, data_mem_req.do_write);
                         end
                     end else begin
                         current_stage <= stage_writeback;
+                        $display("[STAGE] Transitioning to WRITEBACK");
                     end
-                    $display("[STAGE] Transitioning to WRITEBACK");
                 end
                 stage_writeback: begin
                     current_stage <= stage_fetch;
@@ -330,7 +328,7 @@ module core (
         case (instr.opcode)
             OPCODE_LUI:     return U_LUI;
             OPCODE_AUIPC:   return U_AUIPC;
-            default:        return X_UNKNOWN
+            default:        return X_UNKNOWN;
         endcase
     endfunction
 
@@ -375,6 +373,7 @@ module core (
         end
     endfunction
 
+    // Uses curr_instr_select and register data to execute appropriate instruction, returning reg_data_t result
     function reg_data_t execute_instr(instr_select_t curr_instr_select, reg_data_t rs1_data, reg_data_t rs2_data);
         case (curr_instr_select)
             R_ADD:  return execute_add(rs1_data, rs2_data);
@@ -404,9 +403,9 @@ module core (
             I_LBU:  return execute_lbu(curr_instr_data.i_type, rs1_data);
             I_LHU:  return execute_lhu(curr_instr_data.i_type, rs1_data);
 
-            S_SB:   return
-            S_SH:   return
-            S_SW:   return
+            S_SB:   return execute_sb(curr_instr_data.s_type, rs1_data);
+            S_SH:   return execute_sh(curr_instr_data.s_type, rs1_data);
+            S_SW:   return execute_sw(curr_instr_data.s_type, rs1_data);
 
             // B_BEQ:
             // B_BNE:
@@ -473,27 +472,27 @@ module core (
     endfunction
 
     function reg_data_t execute_addi(i_type_t instr, reg_data_t rs1);
-        return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm[11:0]}); // Sign-extended immediate value
+        return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm}); // Sign-extended immediate value
     endfunction
 
     function reg_data_t execute_andi(i_type_t instr, reg_data_t rs1);
-        return rs1 & {{20{instr.imm[11]}}, instr.imm[11:0]}; // Sign-extended immediate value
+        return rs1 & {{20{instr.imm[11]}}, instr.imm}; // Sign-extended immediate value
     endfunction
 
     function reg_data_t execute_ori(i_type_t instr, reg_data_t rs1);
-        return rs1 | {{20{instr.imm[11]}}, instr.imm[11:0]}; // Sign-extended immediate value
+        return rs1 | {{20{instr.imm[11]}}, instr.imm}; // Sign-extended immediate value
     endfunction
 
     function reg_data_t execute_xori(i_type_t instr, reg_data_t rs1);
-        return rs1 ^ {{20{instr.imm[11]}}, instr.imm[11:0]}; // Sign-extended immediate value
+        return rs1 ^ {{20{instr.imm[11]}}, instr.imm}; // Sign-extended immediate value
     endfunction
 
     function reg_data_t execute_slti(i_type_t instr, reg_data_t rs1);
-        return ($signed(rs1) < $signed({{20{instr.imm[11]}}, instr.imm[11:0]})) ? REG_ONE_VAL : REG_ZERO_VAL;
+        return ($signed(rs1) < $signed({{20{instr.imm[11]}}, instr.imm})) ? REG_ONE_VAL : REG_ZERO_VAL;
     endfunction
 
     function reg_data_t execute_sltiu(i_type_t instr, reg_data_t rs1);
-        return (rs1 < {{20{instr.imm[11]}}, instr.imm[11:0]}) ? REG_ONE_VAL : REG_ZERO_VAL;
+        return (rs1 < {{20{instr.imm[11]}}, instr.imm}) ? REG_ONE_VAL : REG_ZERO_VAL;
     endfunction
 
     function reg_data_t execute_slli(i_type_t instr, reg_data_t rs1);
@@ -508,39 +507,39 @@ module core (
         return $signed(rs1) >>> instr.imm[4:0]; // [4:0] shamt
     endfunction
 
-    function reg_data_t execute_lb(i_type_t instr);
-        return rs1 + $signed(instr.imm);
+    function reg_data_t execute_lb(i_type_t instr, reg_data_t rs1);
+        return rs1 + {{20{instr.imm[11]}}, instr.imm};
     endfunction
 
-    function reg_data_t execute_lh(i_type_t instr);
-        return rs1 + $signed(instr.imm);
+    function reg_data_t execute_lh(i_type_t instr, reg_data_t rs1);
+        return rs1 + {{20{instr.imm[11]}}, instr.imm};
     endfunction
 
     function reg_data_t execute_lw(i_type_t instr, reg_data_t rs1);
-        return rs1 + $signed(instr.imm);
+        return rs1 + {{20{instr.imm[11]}}, instr.imm};
     endfunction
 
     function reg_data_t execute_lbu(i_type_t instr, reg_data_t rs1);
-        return rs1 + $signed(instr.imm); 
+        return rs1 + {{20{instr.imm[11]}}, instr.imm}; 
     endfunction
 
     function reg_data_t execute_lhu(i_type_t instr, reg_data_t rs1);
-        return rs1 + $signed(instr.imm);
+        return rs1 + {{20{instr.imm[11]}}, instr.imm};
     endfunction
 
     // function void execute_jalr(i_type_t instr, reg_file_io_t register_io);
     // endfunction
 
-    function reg_data_t execute_sb(s_type_t instr);
-        return rs1 + $signed(instr.imm);
+    function reg_data_t execute_sb(s_type_t instr, reg_data_t rs1);
+        return rs1 + {{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo};
     endfunction
 
-    function reg_data_t execute_sh(s_type_t instr);
-        return rs1 + $signed(instr.imm);
+    function reg_data_t execute_sh(s_type_t instr, reg_data_t rs1);
+        return rs1 + {{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo};
     endfunction
 
-    function reg_data_t execute_sw(s_type_t instr);
-        return rs1 + $signed(instr.imm);
+    function reg_data_t execute_sw(s_type_t instr, reg_data_t rs1);
+        return rs1 + {{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo};
     endfunction
 
     // function void execute_beq(b_type_t instr);
@@ -562,24 +561,54 @@ module core (
     // endfunction
 
     function reg_data_t execute_lui(u_type_t instr); // TODO: Remove magic numbers for sign extension
-        return {instr.imm, 12{1'b0}};
+        return {instr.imm, {12{1'b0}}};
     endfunction
 
     function reg_data_t execute_auipc(u_type_t instr, word pc); // TODO: Remove magic numbers for sign extension
-        return pc + {instr.imm, 12{1'b0}}; 
+        return pc + {instr.imm, {12{1'b0}}}; 
     endfunction
 
     // function void execute_jal(j_type_t instr);
     // endfunction
 
+    // Calculate & return which bytes should be read from memory after 4-byte aligning memory address request
+    // Subtract true address from aligned address to get offset to select byte plane
+    function logic [3:0] calculate_mem_offset(instr_select_t curr_instr_select, reg_data_t rd_data_to_writeback);
+        logic [31:0] aligned_addr;
+        mem_offset_t byte_offset;
+        aligned_addr = {rd_data_to_writeback[31:2], 2'd0}; // Drop lowest 2 bits for alignment
+        byte_offset = mem_offset_t'(rd_data_to_writeback - aligned_addr); // Cast may be problematic; should never fall outside of enum
+        $display("[MEM] Calculated misalignment for byte plane is %d for addr 0x%h", byte_offset, data_mem_req.addr);
+        if (curr_instr_select == I_LW || curr_instr_select == S_SW) begin
+            return 4'b1111;
+        end else if (curr_instr_select == I_LB || curr_instr_select == I_LBU || curr_instr_select == S_SB) begin
+            case (byte_offset)
+                ZERO:    return 4'b0001;
+                ONE:     return 4'b0010;
+                TWO:     return 4'b0100;
+                THREE:   return 4'b1000;
+                default: return 4'b0000; // Should never happen
+            endcase
+        end else if (curr_instr_select == I_LH || curr_instr_select == I_LHU || curr_instr_select == S_SH) begin
+            case (byte_offset)
+                ZERO:    return 4'b0011;
+                ONE:     return 4'b0110;
+                TWO:     return 4'b1100;
+                default: return 4'b0000; // Should never happen
+            endcase
+        end else begin
+            return 4'b0000; // Should never happen
+        end
+    endfunction
+
     // Given current load instruction memory rsp, return sign/zero extended memory response according to instruction
     function reg_data_t interpret_read_memory_rsp(instr_select_t curr_instr_select, memory_io_rsp32 data_mem_rsp);
         case (curr_instr_select)
-            I_LB:     return {24{data_mem_rsp.data[7]}, data_mem_rsp[7:0]};
-            I_LH:     return {16{data_mem_rsp.data[15]}, data_mem_rsp[15:0]};
+            I_LB:     return reg_data_t'({{24{data_mem_rsp.data[7]}}, data_mem_rsp.data[7:0]});
+            I_LH:     return reg_data_t'({{16{data_mem_rsp.data[15]}}, data_mem_rsp.data[15:0]});
             I_LW:     return data_mem_rsp.data;
-            I_LBU:    return {24{1'b0}, data_mem_rsp[7:0]};
-            I_LHU:    return {16{1'b0}, data_mem_rsp[15:0]};
+            I_LBU:    return reg_data_t'({{24{1'b0}}, data_mem_rsp.data[7:0]});
+            I_LHU:    return reg_data_t'({{16{1'b0}}, data_mem_rsp.data[15:0]});
             default:  return data_mem_rsp.data; // Should never happen
         endcase
     endfunction

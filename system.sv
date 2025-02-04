@@ -236,6 +236,14 @@ typedef enum logic [5:0] {
     ,X_UNKNOWN
 } instr_select_t;
 
+// Use
+typedef enum logic [31:0] {
+    ZERO
+    ,ONE
+    ,TWO
+    ,THREE
+} mem_offset_t;
+
 // Register file variables
 
 // 32-bit type representing data to/from registers
@@ -247,7 +255,7 @@ localparam reg_data_t REG_ZERO_VAL = 32'd0;
 localparam reg_index_t REG_ZERO = 5'd0;
 
 // Used by certain instructions to set register output to one
-localparam reg_data_t REG_ONE_VAL = 31'd1;
+localparam reg_data_t REG_ONE_VAL = 32'd1;
 
 
 // Struct for easier manipulation of register file I/O

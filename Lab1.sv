@@ -64,7 +64,7 @@ function string debug_decode_i_type(i_type_t instr);
     else if (instr.opcode == OPCODE_IMM)
         return $sformatf("%-5s %-4s %-4s %-10s", mnemonic, debug_decode_register(instr.rd), debug_decode_register(instr.rs1), $sformatf("%0d", $signed(instr.imm)));
     else
-        return $sformatf("%-5s %-4s %0d(%s)", mnemonic, debug_decode_register(instr.rd), $signed({instr.imm}), debug_decode_register(instr.rs1));  
+        return $sformatf("%-5s %-4s %0d(%s)", mnemonic, debug_decode_register(instr.rd), $signed(instr.imm), debug_decode_register(instr.rs1));  
 endfunction
 
 // Returns string representation of S-Type instruction
