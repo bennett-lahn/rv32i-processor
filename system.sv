@@ -9,6 +9,11 @@
 
 `define user_tag_size 16
 
+`define BYTE 8
+
+// This file contains basic types used by the processor to define/decode instructions
+// Specific types for registers are found in register_file.sv
+
 typedef logic[`word_size - 1:0] word;
 
 // Opcodes for I-Type instructions
@@ -236,37 +241,12 @@ typedef enum logic [5:0] {
     ,X_UNKNOWN
 } instr_select_t;
 
-// Use
+// Used to distinguish between possible memory offsets when aligning halfword/byte read/writes 
 typedef enum logic [31:0] {
     ZERO
     ,ONE
     ,TWO
     ,THREE
 } mem_offset_t;
-
-// Register file variables
-
-// 32-bit type representing data to/from registers
-typedef logic [31:0] reg_data_t;
-
-// Values for x0 register; data and address
-// REG_ZERO_VAL also used by some instructions to zero output
-localparam reg_data_t REG_ZERO_VAL = 32'd0;
-localparam reg_index_t REG_ZERO = 5'd0;
-
-// Used by certain instructions to set register output to one
-localparam reg_data_t REG_ONE_VAL = 32'd1;
-
-
-// Struct for easier manipulation of register file I/O
-typedef struct packed {
-    reg_index_t read_reg_addr_1;
-    reg_index_t read_reg_addr_2;
-    reg_index_t write_reg_addr;
-    reg_data_t write_data;
-    logic write_enable;
-    reg_data_t read_data_1;
-    reg_data_t read_data_2;
-} reg_file_io_t;
 
 `endif

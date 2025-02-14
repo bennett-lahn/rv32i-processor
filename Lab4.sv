@@ -5,6 +5,11 @@
 `include "memory.sv"
 `include "Lab1.sv"
 `include "execute_func.sv"
+`include "decode_func.sv"
+`include "mem_func.sv"
+`include "register_file.sv"
+
+// TODO: Split off into multiple files, this file is way too long
 
 module core (
     input logic  clk
@@ -110,14 +115,6 @@ module core (
         end
     end
 
-    // Idea: What if writing/reading is not working because setting byte plane to 0110 expects the data to be in 
-    // 0110 bits of the request data as well (i.e., system does not know to move bits from LSB, LSB+1 into middle two bytes)
-
-    // TODO: This data memory read/write DOES NOT work as written
-    // Memory automatically aligns given address by dropping the lowest two bits
-    // Therefore, we need to figure out which byte plane to activate/where to put data/half words by looking at the diff
-    // between the actual address and the aligned address with bits dropped
-
     // Data memory request logic for execute, mem stage
     // Load and store for a type must be naturally aligned to the respective datatype
     // (i.e. the effective address is not divisible by the size of the access in bytes)
@@ -179,7 +176,7 @@ module core (
 
                     // Only writeback for appropriate instructions
                     writeback_enable <= (curr_instr_select < S_SB || curr_instr_select > B_BGEU) ? 1 : 0;
-                    rd_data_to_writeback <= execute_instr(curr_instr_select, rs1_data, rs2_data);
+                    rd_data_to_writeback <= execute_instr(curr_instr_data, pc, curr_instr_select, rs1_data, rs2_data);
                     rd_writeback_addr <= curr_instr_data.r_type.rd; // All types use same rd bit location in instr
 
                     // If store instruction, store data of rs2 for memory write
@@ -228,144 +225,6 @@ module core (
         end
     end
 
-    // Translates raw instruction into specific instruction type using opcode
-    function instr_select_t parse_instruction(rv32i_instruction_t instr);
-        instr_type_t instr_type;
-        instr_type = decode_opcode(instr.raw[6:0]); // Opcode
-        case (instr_type)
-            INSTR_R_TYPE: return decode_r_type(instr.r_type);
-            INSTR_I_TYPE: return decode_i_type(instr.i_type);
-            INSTR_S_TYPE: return decode_s_type(instr.s_type);
-            // INSTR_B_TYPE: return decode_b_type(instr.b_type);
-            INSTR_U_TYPE: return decode_u_type(instr.u_type);
-            // INSTR_J_TYPE: return decode_j_type(instr.j_type);
-            default: return X_UNKNOWN;
-        endcase
-    endfunction
-
-    // Function returning instr_type_t corrresponding to instruction type of opcode
-    function instr_type_t decode_opcode(opcode_t opcode);
-        case (opcode)
-            OPCODE_R_TYPE: return INSTR_R_TYPE; // R-type
-            OPCODE_IMM:    return INSTR_I_TYPE; // I-type
-            OPCODE_JALR:   return INSTR_I_TYPE; // I-type
-            OPCODE_LOAD:   return INSTR_I_TYPE; // I-type
-            OPCODE_S_TYPE: return INSTR_S_TYPE; // S-type
-            OPCODE_B_TYPE: return INSTR_B_TYPE; // B-type
-            OPCODE_LUI:    return INSTR_U_TYPE; // U-type
-            OPCODE_AUIPC:  return INSTR_U_TYPE; // U-type
-            OPCODE_JAL:    return INSTR_J_TYPE; // J-type
-            default: return INSTR_UNKNOWN;
-        endcase
-    endfunction
-
-    // Decodes and executes appropriate R-type instruction given r_type_t input
-    function instr_select_t decode_r_type(r_type_t instr);
-        case (instr.funct3)
-            FUNCT3_ADD_SUB: begin
-                return instr_select_t'((instr.funct7 == FUNCT7_ADD) ? R_ADD : 
-                                       (instr.funct7 == FUNCT7_SUB) ? R_SUB : X_UNKNOWN);
-            end
-            FUNCT3_AND:     return R_AND;
-            FUNCT3_OR:      return R_OR;
-            FUNCT3_XOR:     return R_XOR;
-            FUNCT3_SLL:     return R_SLL;
-            FUNCT3_SRL_SRA: begin 
-                return instr_select_t'((instr.funct7 == FUNCT7_SRL) ? R_SRL : 
-                                       (instr.funct7 == FUNCT7_SRA) ? R_SRA : X_UNKNOWN);
-            end
-            FUNCT3_SLT:     return R_SLT;
-            FUNCT3_SLTU:    return R_SLTU;
-            default:        return X_UNKNOWN; // Handle unknown instructions by doing nothing
-        endcase
-    endfunction
-
-    // Decodes appropriate I-type instruction given i_type_t input
-    // FUNCT3 names are not to be taken literally in this case statement since 
-    // multiple i-type instructions share funct3
-    function instr_select_t decode_i_type(i_type_t instr);
-        case (instr.funct3)
-            FUNCT3_ADDI: begin     
-                return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_ADDI : 
-                                       (instr.opcode == OPCODE_JALR) ? I_JALR : 
-                                       (instr.opcode == OPCODE_LOAD) ? I_LB : X_UNKNOWN);
-        end
-            FUNCT3_SLLI: begin
-                return instr_select_t'((instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SLLI) ? I_SLLI : 
-                                       (instr.opcode == OPCODE_LOAD) ? I_LH : X_UNKNOWN);
-        end
-            FUNCT3_SRLI: begin    
-                return instr_select_t'((instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRLI) ? I_SRLI : 
-                                       (instr.opcode == OPCODE_IMM && instr.imm[11:5] == SHIFT_TYPE_SRAI) ? I_SRAI : 
-                                       (instr.opcode == OPCODE_LOAD) ? I_LHU : X_UNKNOWN);
-
-        end
-            FUNCT3_SLTI: begin
-                return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_SLTI :
-                                       (instr.opcode == OPCODE_LOAD) ? I_LW : X_UNKNOWN);
-        end
-            FUNCT3_XORI: begin
-                return instr_select_t'((instr.opcode == OPCODE_IMM) ? I_XORI : 
-                                       (instr.opcode == OPCODE_LOAD) ? I_LBU : X_UNKNOWN);
-        end
-            FUNCT3_ANDI:     return I_ANDI;
-            FUNCT3_ORI:      return I_ORI;
-            FUNCT3_SLTIU:    return I_SLTIU;
-            default:         return X_UNKNOWN; // Handle unsupported instructions
-        endcase
-    endfunction
-
-    // Decodes s-type instructon given s_type_t instr input
-    function instr_select_t decode_s_type(s_type_t instr);
-        case (instr.funct3)
-            FUNCT3_SB: return S_SB;
-            FUNCT3_SH: return S_SH;
-            FUNCT3_SW: return S_SW;
-            default:   return X_UNKNOWN;
-        endcase
-    endfunction
-
-    // Decodes u-type instruction given u_type_t instr input
-    function instr_select_t decode_u_type(u_type_t instr);
-        case (instr.opcode)
-            OPCODE_LUI:     return U_LUI;
-            OPCODE_AUIPC:   return U_AUIPC;
-            default:        return X_UNKNOWN;
-        endcase
-    endfunction
-
-    // Given instruction, returns appropriate rs1 register number
-    function reg_index_t update_rs1_addr(rv32i_instruction_t reg_instr_data);
-        // Decides which parts of instruction to use to load registers
-        instr_type_t reg_load_type;
-        reg_load_type = decode_opcode(reg_instr_data.r_type.opcode); // Opcode same for all instr types
-        case (reg_load_type)
-            INSTR_R_TYPE: return reg_instr_data.r_type.rs1;
-            INSTR_I_TYPE: return reg_instr_data.i_type.rs1;
-            INSTR_S_TYPE: return reg_instr_data.s_type.rs1;
-            // INSTR_B_TYPE: return decode_b_type(instr.b_type);
-            INSTR_U_TYPE: return REG_ZERO;
-            // INSTR_J_TYPE: return decode_j_type(instr.j_type);
-            default: return REG_ZERO;
-        endcase
-    endfunction
-
-    // Given instruction, returns appropriate rs2 register number
-    function reg_index_t update_rs2_addr(rv32i_instruction_t reg_instr_data);
-        // Decides which parts of instruction to use to load registers
-        instr_type_t reg_load_type;
-        reg_load_type = decode_opcode(reg_instr_data.r_type.opcode); // Opcode same for all instr types
-        case (reg_load_type)
-            INSTR_R_TYPE: return reg_instr_data.r_type.rs2;
-            INSTR_I_TYPE: return REG_ZERO;
-            INSTR_S_TYPE: return reg_instr_data.s_type.rs2;
-            // INSTR_B_TYPE: return decode_b_type(instr.b_type);
-            INSTR_U_TYPE: return REG_ZERO;
-            // INSTR_J_TYPE: return decode_j_type(instr.j_type);
-            default: return REG_ZERO;
-        endcase
-    endfunction
-
     // Returns 1 if stage is writeback and writeback enabled by execute stage, otherwise 0
     function logic check_writeback(stage current_stage, logic writeback_enable);
         if (current_stage == stage_writeback && writeback_enable) begin
@@ -374,130 +233,7 @@ module core (
             return 0;
         end
     endfunction
-
-    // The functions below manipulate memory read/writes by calculating the misalignment between the 4-byte aligned
-    // main memory and the requested read/write appropriately shifting data so it is written to the appropriate byte
-    // planes or moved into the least significant bytes
-
-    // Return which bytes should be read from memory after 4-byte aligning memory address request
-    function logic [3:0] create_byte_plane(instr_select_t curr_instr_select, reg_data_t mem_addr);
-        mem_offset_t byte_offset;
-        byte_offset = calculate_mem_offset(rd_data_to_writeback);
-        $display("[MEM] Calculated misalignment for byte plane is %d for addr 0x%h", byte_offset, data_mem_req.addr);
-        if (curr_instr_select == I_LW || curr_instr_select == S_SW) begin
-            return 4'b1111;
-        end else if (curr_instr_select == I_LB || curr_instr_select == I_LBU || curr_instr_select == S_SB) begin
-            case (byte_offset)
-                ZERO:    return 4'b0001;
-                ONE:     return 4'b0010;
-                TWO:     return 4'b0100;
-                THREE:   return 4'b1000;
-                default: return 4'b0000; // Should never happen
-            endcase
-        end else if (curr_instr_select == I_LH || curr_instr_select == I_LHU || curr_instr_select == S_SH) begin
-            case (byte_offset)
-                ZERO:    return 4'b0011;
-                ONE:     return 4'b0110;
-                TWO:     return 4'b1100;
-                default: return 4'b0000; // Should never happen
-            endcase
-        end else begin
-            return 4'b0000; // Should never happen
-        end
-    endfunction
-
-    // Shift data into appropriate bytes depending on which byte planes are going to be written to
-    function reg_data_t write_shift_data_by_offset(instr_select_t curr_instr_select, reg_data_t mem_addr, reg_data_t data);
-        logic [3:0] byte_plane;
-        byte_plane = create_byte_plane(curr_instr_select, mem_addr);
-        case (byte_plane)
-            4'b0001: return data;
-            4'b0010: return data << BYTE;
-            4'b0100: return data << 2*BYTE;
-            4'b1000: return data << 3*BYTE;
-            4'b0011: return data;
-            4'b0110: return data << BYTE;
-            4'b1100: return data << 2*BYTE;
-            default: return data;
-        endcase
-    endfunction
-
-    // Shift data into lowest bytes depending on which byte planes were read by memory, return shifted value
-    function reg_data_t read_shift_data_by_offset(instr_select_t curr_instr_select, reg_data_t mem_addr, reg_data_t data);
-        logic [3:0] byte_plane;
-        byte_plane = create_byte_plane(curr_instr_select, mem_addr);
-        case (byte_plane)
-            4'b0001: return data;
-            4'b0010: return data >> BYTE;
-            4'b0100: return data >> 2*BYTE; 
-            4'b1000: return data >> 3*BYTE;
-            4'b0011: return data;
-            4'b0110: return data >> BYTE;
-            4'b1100: return data >> 2*BYTE;
-            default: return data;
-        endcase
-    endfunction
-
-    // Helper function that compares memory address to 4-byte aligned version and returns numerical difference between the two
-    // Subtract true address from aligned address to get offset to select byte plane
-    function mem_offset_t calculate_mem_offset(reg_data_t unaligned_addr);
-        logic [31:0] aligned_addr;
-        aligned_addr = {unaligned_addr[31:2], 2'd0}; // Drop lowest 2 bits for alignment
-        return mem_offset_t'(unaligned_addr - aligned_addr); // Cast may be problematic; should never fall outside of enum
-    endfunction
-
-    // Given current load instruction memory rsp, return sign/zero extended memory response according to instruction
-    function reg_data_t interpret_read_memory_rsp(instr_select_t curr_instr_select, memory_io_rsp32 data_mem_rsp);
-        reg_data_t temp;
-        // Call shift data to move rsp data into proper LSB(s)
-        temp = read_shift_data_by_offset(curr_instr_select, data_mem_rsp.addr, data_mem_rsp.data);
-        case (curr_instr_select)
-            I_LB:     return reg_data_t'({{24{temp[7]}}, temp[7:0]});
-            I_LH:     return reg_data_t'({{16{temp[15]}}, temp[15:0]});
-            I_LW:     return temp;
-            I_LBU:    return reg_data_t'({{24{1'b0}}, temp[7:0]});
-            I_LHU:    return reg_data_t'({{16{1'b0}}, temp[15:0]});
-            default:  return temp; // Should never happen
-        endcase
-    endfunction
-
-endmodule
-
-// Module controlling register file containing 32 registers, including 0 reg
-// Read address inputs select the register to be read from (0-31)
-// read_reg_addr_1 only used for rs1
-// read_reg_addr_2 only used for rs2
-// write_reg_addr selects register to be written to by write_data if write_enable is true
-module register_file_m (
-    input logic clk
-    ,input logic reset
-    ,input reg_index_t read_reg_addr_1
-    ,input reg_index_t read_reg_addr_2
-    ,input reg_index_t write_reg_addr
-    ,input reg_data_t write_data
-    ,input logic write_enable
-    ,output reg_data_t read_data_1
-    ,output reg_data_t read_data_2
-);
     
-    // Register array: 32 registers of 32 bits each
-    logic [31:0] reg_file [31:0];
-
-    // Synchronous read & write
-    always_ff @(posedge clk) begin
-        if (reset) begin
-            for (int i = 0; i < 32; i++) begin
-                reg_file[i] <= REG_ZERO_VAL;
-            end
-        end else begin
-            if (write_enable && write_reg_addr != REG_ZERO)
-                reg_file[write_reg_addr] <= write_data; // Write
-            // Read
-            read_data_1 <= (read_reg_addr_1 == REG_ZERO) ? REG_ZERO_VAL : reg_file[read_reg_addr_1];
-            read_data_2 <= (read_reg_addr_2 == REG_ZERO) ? REG_ZERO_VAL : reg_file[read_reg_addr_2];
-        end
-    end
-
 endmodule
 
 `endif

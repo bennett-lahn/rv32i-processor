@@ -1,8 +1,11 @@
 `ifndef _execute_func_
 `define _execute_func_
+`include "base.sv"
+`include "system.sv"
+`include "register_file.sv" // Used for reg_index_t type
 
 // Uses curr_instr_select and register data to execute appropriate instruction, returning reg_data_t result
-function reg_data_t execute_instr(instr_select_t curr_instr_select, reg_data_t rs1_data, reg_data_t rs2_data);
+function reg_data_t execute_instr(rv32i_instruction_t curr_instr_data, word pc, instr_select_t curr_instr_select, reg_data_t rs1_data, reg_data_t rs2_data);
     case (curr_instr_select)
         R_ADD:  return execute_add(rs1_data, rs2_data);
         R_SUB:  return execute_sub(rs1_data, rs2_data);

@@ -78,8 +78,18 @@ _start:
     # ----------------------
     # Previously Implemented Tests (R & I type)
     # ----------------------
-    add    x12, x1, x2        # x12 = x1 + x2 (10 + -5 = 5)
-    sub    x13, x1, x2        # x13 = x1 - x2 (10 - (-5) = 15)
+
+    # Test setup: Load initial values into registers
+
+    addi x1, x0, 10           # x1 = 10
+    addi x2, x0, 20           # x2 = 20
+    addi x3, x0, -5           # x3 = -5
+    addi x4, x0, 0            # x4 = 0 (test zero handling)
+    addi x5, x0, 15           # x5 = 15
+    addi x6, x0, 1            # x6 = 1 (for shift instructions)
+
+    add    x12, x1, x2        # x12 = x1 + x2 (30)
+    sub    x13, x1, x2        # x13 = x1 - x2 (-10)
     and    x14, x1, x2        # x14 = x1 & x2
     or     x15, x1, x2        # x15 = x1 | x2
     xor    x16, x1, x2        # x16 = x1 ^ x2
