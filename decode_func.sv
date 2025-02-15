@@ -11,9 +11,9 @@ function instr_select_t parse_instruction(rv32i_instruction_t instr);
         INSTR_R_TYPE: return decode_r_type(instr.r_type);
         INSTR_I_TYPE: return decode_i_type(instr.i_type);
         INSTR_S_TYPE: return decode_s_type(instr.s_type);
-        // INSTR_B_TYPE: return decode_b_type(instr.b_type);
+        INSTR_B_TYPE: return decode_b_type(instr.b_type);
         INSTR_U_TYPE: return decode_u_type(instr.u_type);
-        // INSTR_J_TYPE: return decode_j_type(instr.j_type);
+        INSTR_J_TYPE: return decode_j_type(instr.j_type);
         default: return X_UNKNOWN;
     endcase
 endfunction
@@ -34,7 +34,7 @@ function instr_type_t decode_opcode(opcode_t opcode);
     endcase
 endfunction
 
-// Decodes and executes appropriate R-type instruction given r_type_t input
+// Decodes and returns appropriate R-type instruction given r_type_t input
 function instr_select_t decode_r_type(r_type_t instr);
     case (instr.funct3)
         FUNCT3_ADD_SUB: begin
@@ -109,6 +109,24 @@ function instr_select_t decode_u_type(u_type_t instr);
     endcase
 endfunction
 
+// Decodes b-type instruction given b_type_t input
+function instr_select_t decode_b_type(b_type_t instr);
+    case (instr.funct3)
+        FUNCT3_BEQ:   return B_BEQ;
+        FUNCT3_BNE:   return B_BNE;
+        FUNCT3_BLT:   return B_BLT;
+        FUNCT3_BGE:   return B_BGE;
+        FUNCT3_BLTU:  return B_BLTU;
+        FUNCT3_BGEU:  return B_BGEU;
+        default:      return X_UNKNOWN;
+    endcase
+endfunction
+
+// Decodes j-type instruction given j_type_t input
+function instr_select_t decode_j_type(j_type_t instr);
+    return J_JAL;
+endfunction
+
 // Given instruction, returns appropriate rs1 register number
 function reg_index_t update_rs1_addr(rv32i_instruction_t reg_instr_data);
     // Decides which parts of instruction to use to load registers
@@ -118,9 +136,9 @@ function reg_index_t update_rs1_addr(rv32i_instruction_t reg_instr_data);
         INSTR_R_TYPE: return reg_instr_data.r_type.rs1;
         INSTR_I_TYPE: return reg_instr_data.i_type.rs1;
         INSTR_S_TYPE: return reg_instr_data.s_type.rs1;
-        // INSTR_B_TYPE: return decode_b_type(instr.b_type);
+        INSTR_B_TYPE: return reg_instr_data.b_type.rs1;
         INSTR_U_TYPE: return REG_ZERO;
-        // INSTR_J_TYPE: return decode_j_type(instr.j_type);
+        INSTR_J_TYPE: return REG_ZERO;
         default: return REG_ZERO;
     endcase
 endfunction
@@ -134,9 +152,9 @@ function reg_index_t update_rs2_addr(rv32i_instruction_t reg_instr_data);
         INSTR_R_TYPE: return reg_instr_data.r_type.rs2;
         INSTR_I_TYPE: return REG_ZERO;
         INSTR_S_TYPE: return reg_instr_data.s_type.rs2;
-        // INSTR_B_TYPE: return decode_b_type(instr.b_type);
+        INSTR_B_TYPE: return reg_instr_data.b_type.rs2;
         INSTR_U_TYPE: return REG_ZERO;
-        // INSTR_J_TYPE: return decode_j_type(instr.j_type);
+        INSTR_J_TYPE: return REG_ZERO;
         default: return REG_ZERO;
     endcase
 endfunction

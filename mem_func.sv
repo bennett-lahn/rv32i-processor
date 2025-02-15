@@ -1,6 +1,6 @@
 `ifndef _mem_func_
 `define _mem_func_
-`define BYTE 8
+`include "base.sv"
 `include "system.sv"
 `include "register_file.sv" // Used for reg_index_t type
 
@@ -8,8 +8,6 @@
 // main memory and the requested read/write instruction + addr, appropriately shifting data so it is written to the appropriate byte
 // planes (if a write) or moved into the least significant bytes (if a read)
 // As the main memory is 4-byte aligned, this is only necessary for halfword/byte instructions
-
-localparam int BYTE = 8;
 
 // Return which bytes should be read from memory after 4-byte aligning memory address request
 function logic [3:0] create_byte_plane(instr_select_t curr_instr_select, reg_data_t mem_addr);

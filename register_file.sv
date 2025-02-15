@@ -4,6 +4,7 @@
 // This file contains the register file module and related register types
 
 // 32-bit type representing data to/from registers
+// Also used as a generic 32-bit data type
 typedef logic [31:0] reg_data_t;
 
 // Values for x0 register; data and address

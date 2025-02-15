@@ -9,7 +9,7 @@
 `include "mem_func.sv"
 `include "register_file.sv"
 
-// TODO: Split off into multiple files, this file is way too long
+// TODO: Replace uses of reg_data_t that aren't used in registers to word
 
 module core (
     input logic  clk
@@ -22,7 +22,7 @@ module core (
 );
 
     // Program counter
-    word pc;
+    word_t pc;
 
     // Enum for processor cycle stages
     typedef enum {
@@ -91,12 +91,27 @@ module core (
     );
 
     // Program counter control
+    // LAB 5 NOTE: NEEDS RS1 VALUE FOR JALR
+    // LAB 5 NOTE: Redo use of execute_instr (reuse/store signal some other way)
     always @(posedge clk) begin
        if (reset)
           pc <= reset_pc;
-
-       if (current_stage == stage_writeback)
-          pc <= pc + 4;
+       if (current_stage == stage_writeback) begin
+           if (curr_instr_select > S_SW && curr_instr_select < U_LUI) begin
+                if (execute_instr(curr_instr_data, pc, curr_instr_select, rs1_data, rs2_data)[0]) begin
+                    pc <= build_branch_pc(curr_instr_data.b_type, pc);
+                end else begin
+                    pc <= pc + 4;
+                end
+           end else if (curr_instr_select == J_JAL) begin
+                pc <= build_jal_pc(curr_instr_data.j_type, pc);
+           end else if (curr_instr_select == I_JALR) begin
+               pc <= build_jalr_pc(curr_instr_data.i_type, pc, rs1_data);
+           end else begin
+               pc <= pc + 4;
+           end
+       end
+          
     end
 
     // Instruction memory request logic for fetch stage
@@ -134,6 +149,7 @@ module core (
         end else begin
             data_mem_req.valid = 0;
             data_mem_req.addr = 0;
+            data_mem_req.data = REG_ZERO_VAL;
             data_mem_req.do_read = 4'b0000;
             data_mem_req.do_write = 4'b0000;
         end
@@ -154,7 +170,7 @@ module core (
                 stage_fetch: begin
                     $display("[FETCH] Fetching instruction at PC: %h", pc);
                     if (instr_mem_rsp.valid) begin
-                        $display("[STAGE] Transitioning to DECODE");
+                        // $display("[STAGE] Transitioning to DECODE");
                         current_stage <= stage_decode;
                         curr_instr_data <= instr_mem_rsp.data;
                     end else begin
@@ -162,17 +178,17 @@ module core (
                     end
                 end
                 stage_decode: begin
-                    $display("[DECODE] Decoding instruction, should be:");
+                    // $display("[DECODE] Decoding instruction, should be:");
                     print_instruction(pc, curr_instr_data.raw);
                     current_stage <= stage_execute;
                     curr_instr_select <= parse_instruction(instr_mem_rsp.data);
-                    $display("[STAGE] Transitioning to EXECUTE");
+                    // $display("[STAGE] Transitioning to EXECUTE");
                 end
                 stage_execute: begin
                     current_stage <= stage_mem;
 
-                    $display("[EXECUTE] Executing instruction %s", curr_instr_select.name());
-                    $display("[EXECUTE] If valid: rs1 val %d, rs2 val %d, imm val %d", curr_instr_data.r_type.rs1, curr_instr_data.r_type.rs2, $signed(curr_instr_data.i_type.imm));
+                    // $display("[EXECUTE] Executing instruction %s", curr_instr_select.name());
+                    // $display("[EXECUTE] If valid: rs1 val %d, rs2 val %d, imm val %d", curr_instr_data.r_type.rs1, curr_instr_data.r_type.rs2, $signed(curr_instr_data.i_type.imm));
 
                     // Only writeback for appropriate instructions
                     writeback_enable <= (curr_instr_select < S_SB || curr_instr_select > B_BGEU) ? 1 : 0;
@@ -182,18 +198,18 @@ module core (
                     // If store instruction, store data of rs2 for memory write
                     if (curr_instr_select >= S_SB && curr_instr_select <= S_SW)
                         store_data_reg <= rs2_data;
-                    $display("[STAGE] Transitioning to MEM");
+                    // $display("[STAGE] Transitioning to MEM");
                 end
                 stage_mem: begin
                     // If instruction is load, we need to update rd_data_to_writeback using data read from memory
                     if (curr_instr_select < I_LB || curr_instr_select > S_SW)
-                        $display("[EXECUTE] Got result %d to return to reg %d", $signed(rd_data_to_writeback), rd_writeback_addr);
+                        // $display("[EXECUTE] Got result %d to return to reg %d", $signed(rd_data_to_writeback), rd_writeback_addr);
 
                     // Handle memory read or write, otherwise continue to writeback
                     if (curr_instr_select >= I_LB && curr_instr_select <= I_LHU) begin // If reading
                         if (data_mem_rsp.valid == 1) begin
-                            $display("[MEM] Got successful read from address 0x%h", data_mem_rsp.addr);
-                            $display("[STAGE] Transitioning to WRITEBACK");
+                            // $display("[MEM] Got successful read from address 0x%h", data_mem_rsp.addr);
+                            // $display("[STAGE] Transitioning to WRITEBACK");
                             current_stage <= stage_writeback;
                             rd_data_to_writeback <= interpret_read_memory_rsp(curr_instr_select, data_mem_rsp);
                         end else begin
@@ -201,21 +217,21 @@ module core (
                         end
                     end else if (curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin // If writing
                         if (data_mem_rsp.valid == 1) begin
-                            $display("[MEM] Successfully wrote to address 0x%h", data_mem_rsp.addr);
+                            // $display("[MEM] Successfully wrote to address 0x%h", data_mem_rsp.addr);
                             current_stage <= stage_writeback;
                         end else begin
                             current_stage <= stage_mem;
-                            $display("[MEM] Waiting on write to 0x%h, byte plane %b", data_mem_req.addr, data_mem_req.do_write);
+                            // $display("[MEM] Waiting on write to 0x%h, byte plane %b", data_mem_req.addr, data_mem_req.do_write);
                         end
                     end else begin
                         current_stage <= stage_writeback;
-                        $display("[STAGE] Transitioning to WRITEBACK");
+                        // $display("[STAGE] Transitioning to WRITEBACK");
                     end
                 end
                 stage_writeback: begin
                     current_stage <= stage_fetch;
-                    $display("[WRITEBACK] State: Writeback to reg %d with reg value %d, writeback_enable: %d", rd_writeback_addr, $signed(rd_data_to_writeback), writeback_enable);
-                    $display("[STAGE] Transitiong to FETCH");
+                    // $display("[WRITEBACK] State: Writeback to reg %d with reg value %d, writeback_enable: %d", rd_writeback_addr, $signed(rd_data_to_writeback), writeback_enable);
+                    // $display("[STAGE] Transitiong to FETCH");
                 end
                 default: begin
                     $display("Should never get here");
@@ -232,6 +248,29 @@ module core (
         end else begin
             return 0;
         end
+    endfunction
+
+    // Returns new program counter value by adding sign-extended j-type immediate to current program counter value
+    function word_t build_jal_pc(j_type_t instr, word_t pc);
+        word_t offset, sum;
+        offset = {{12{instr.imm20}}, instr.imm20, instr.imm19_12, instr.imm11, instr.imm10_1};
+        sum = pc + $signed(offset);
+        return {sum[31:1], 1'b0}; // Set lowest bit to 0 to align address
+    endfunction
+
+    // Returns new program counter value by adding rs1 value + sign-extended immediate
+    function word_t build_jalr_pc(i_type_t instr, word_t pc, reg_data_t rs1_data);
+        word_t sign_extended_imm, sum;
+        sign_extended_imm = {{20{instr.imm[11]}}, instr.imm};
+        sum = rs1_data + $signed(sign_extended_imm);
+        return {sum[31:1], 1'b0}; // Set lowest bit to 0 to align address
+    endfunction
+
+    // Returns new program counter value by adding branch offset to current program counter value
+    function word_t build_branch_pc (b_type_t instr, word_t pc);
+        word_t sign_extended_imm;
+        sign_extended_imm = {{20{instr.imm12}}, instr.imm12, instr.imm11, instr.imm10_5, instr.imm4_1[3:1], 1'b0}; // Set lowest bit to 0 to align address
+        return pc + $signed(sign_extended_imm);
     endfunction
     
 endmodule

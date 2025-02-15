@@ -5,7 +5,7 @@
 `include "register_file.sv" // Used for reg_index_t type
 
 // Uses curr_instr_select and register data to execute appropriate instruction, returning reg_data_t result
-function reg_data_t execute_instr(rv32i_instruction_t curr_instr_data, word pc, instr_select_t curr_instr_select, reg_data_t rs1_data, reg_data_t rs2_data);
+function reg_data_t execute_instr(rv32i_instruction_t curr_instr_data, word_t pc, instr_select_t curr_instr_select, reg_data_t rs1_data, reg_data_t rs2_data);
     case (curr_instr_select)
         R_ADD:  return execute_add(rs1_data, rs2_data);
         R_SUB:  return execute_sub(rs1_data, rs2_data);
@@ -19,7 +19,7 @@ function reg_data_t execute_instr(rv32i_instruction_t curr_instr_data, word pc, 
         R_SLTU: return execute_sltu(rs1_data, rs2_data);
 
         I_ADDI: return execute_addi(curr_instr_data.i_type, rs1_data);
-        // I_JALR: rd_data = execute_jalr(curr_instr_data.i_type, rs1_data);
+        I_JALR: return execute_jalr(pc);
         I_SLLI: return execute_slli(curr_instr_data.i_type, rs1_data);
         I_SRLI: return execute_srli(curr_instr_data.i_type, rs1_data);
         I_SRAI: return execute_srai(curr_instr_data.i_type, rs1_data);
@@ -38,19 +38,19 @@ function reg_data_t execute_instr(rv32i_instruction_t curr_instr_data, word pc, 
         S_SH:   return execute_sh(curr_instr_data.s_type, rs1_data);
         S_SW:   return execute_sw(curr_instr_data.s_type, rs1_data);
 
-        // B_BEQ:
-        // B_BNE:
-        // B_BLT:
-        // B_BGE:
-        // B_BLTU:
-        // B_BGEU:
+        B_BEQ:  return execute_beq(rs1_data, rs2_data);
+        B_BNE:  return execute_bne(rs1_data, rs2_data);
+        B_BLT:  return execute_blt(rs1_data, rs2_data);
+        B_BGE:  return execute_bge(rs1_data, rs2_data);
+        B_BLTU: return execute_bltu(rs1_data, rs2_data);
+        B_BGEU: return execute_bgeu(rs1_data, rs2_data);
 
         U_LUI:  return execute_lui(curr_instr_data.u_type);
         U_AUIPC:return execute_auipc(curr_instr_data.u_type, pc);
 
-        // J_JAL:
+        J_JAL:  return execute_jal(pc);
 
-        default: return execute_unknown();
+        default:return execute_unknown();
     endcase
 endfunction
 
@@ -158,8 +158,9 @@ function reg_data_t execute_lhu(i_type_t instr, reg_data_t rs1);
     return rs1 + {{20{instr.imm[11]}}, instr.imm};
 endfunction
 
-// function void execute_jalr(i_type_t instr, reg_file_io_t register_io);
-// endfunction
+function reg_data_t execute_jalr(word_t pc);
+    return pc + 4;
+endfunction
 
 function reg_data_t execute_sb(s_type_t instr, reg_data_t rs1);
     return rs1 + {{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo};
@@ -173,33 +174,54 @@ function reg_data_t execute_sw(s_type_t instr, reg_data_t rs1);
     return rs1 + {{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo};
 endfunction
 
-// function void execute_beq(b_type_t instr);
-// endfunction
+// Functions for branch instructions evaluate expression and if the expression is true return 1, else return 0
 
-// function void execute_bne(b_type_t instr);
-// endfunction
+function reg_data_t execute_beq(reg_data_t rs1, reg_data_t rs2);
+    logic result;
+    result = (rs1 - rs2) == 0;
+    return {{31{1'b0}}, result};
+endfunction
 
-// function void execute_blt(b_type_t instr);
-// endfunction
+function reg_data_t execute_bne(reg_data_t rs1, reg_data_t rs2);
+    logic result;
+    result = (rs1 - rs2) != 0;
+    return {{31{1'b0}}, result};
+endfunction
 
-// function void execute_bge(b_type_t instr);
-// endfunction
+function reg_data_t execute_blt(reg_data_t rs1, reg_data_t rs2);
+    logic result;
+    result = $signed(rs1) < $signed(rs2);
+    return {{31{1'b0}}, result};
+endfunction
 
-// function void execute_bltu(b_type_t instr);
-// endfunction
+function reg_data_t execute_bge(reg_data_t rs1, reg_data_t rs2);
+    logic result;
+    result = $signed(rs1) >= $signed(rs2); 
+    return {{31{1'b0}}, result};
+endfunction
 
-// function void execute_bgeu(b_type_t instr);
-// endfunction
+function reg_data_t execute_bltu(reg_data_t rs1, reg_data_t rs2);
+    logic result;
+    result = rs1 < rs2;
+    return {{31{1'b0}}, result};
+endfunction
+
+function reg_data_t execute_bgeu(reg_data_t rs1, reg_data_t rs2);
+    logic result;
+    result = rs1 >= rs2;
+    return {{31{1'b0}}, result};
+endfunction
 
 function reg_data_t execute_lui(u_type_t instr); // TODO: Remove magic numbers for sign extension
     return {instr.imm, {12{1'b0}}};
 endfunction
 
-function reg_data_t execute_auipc(u_type_t instr, word pc); // TODO: Remove magic numbers for sign extension
+function reg_data_t execute_auipc(u_type_t instr, word_t pc); // TODO: Remove magic numbers for sign extension
     return pc + {instr.imm, {12{1'b0}}}; 
 endfunction
 
-// function void execute_jal(j_type_t instr);
-// endfunction
+function reg_data_t execute_jal(word_t pc);
+    return pc + 4;
+endfunction
 
 `endif

@@ -9,12 +9,10 @@
 
 `define user_tag_size 16
 
-`define BYTE 8
-
 // This file contains basic types used by the processor to define/decode instructions
 // Specific types for registers are found in register_file.sv
 
-typedef logic[`word_size - 1:0] word;
+typedef logic[`word_size - 1:0] word_t;
 
 // Opcodes for I-Type instructions
 localparam logic [6:0] OPCODE_LOAD  = 7'b0000011; // Load instructions (LB, LH, LW, LBU, LHU)
