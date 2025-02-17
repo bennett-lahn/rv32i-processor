@@ -178,13 +178,13 @@ endfunction
 
 function reg_data_t execute_beq(reg_data_t rs1, reg_data_t rs2);
     logic result;
-    result = (rs1 - rs2) == 0;
+    result = (rs1 == rs2);
     return {{31{1'b0}}, result};
 endfunction
 
 function reg_data_t execute_bne(reg_data_t rs1, reg_data_t rs2);
     logic result;
-    result = (rs1 - rs2) != 0;
+    result = (rs1 != rs2);
     return {{31{1'b0}}, result};
 endfunction
 
