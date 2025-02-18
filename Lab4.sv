@@ -103,18 +103,18 @@ module core (
        if (current_stage == stage_writeback) begin
            if (curr_instr_select > S_SW && curr_instr_select < U_LUI) begin
                 if (rd_data_to_writeback == 32'd1) begin
-                    $display("Take branch, result %-0d", rd_data_to_writeback);
-                    $display("New PC %-0h", build_branch_pc(curr_instr_data.b_type, pc));
+                    // $display("Take branch, result %-0d", rd_data_to_writeback);
+                    // $display("New PC %-0h", build_branch_pc(curr_instr_data.b_type, pc));
                     pc <= build_branch_pc(curr_instr_data.b_type, pc);
                 end else begin
-                    $display("Do not take branch, result %-0d", rd_data_to_writeback);
+                    // $display("Do not take branch, result %-0d", rd_data_to_writeback);
                     pc <= pc + 4;
                 end
            end else if (curr_instr_select == J_JAL) begin
-                $display("Doing JAL things.");
+                // $display("Doing JAL things.");
                 pc <= build_jal_pc(curr_instr_data.j_type, pc);
            end else if (curr_instr_select == I_JALR) begin
-                $display("Doing JALR things.");
+                // $display("Doing JALR things.");
                pc <= build_jalr_pc(curr_instr_data.i_type, pc, rs1_data_r);
            end else begin
                pc <= pc + 4;
@@ -149,7 +149,9 @@ module core (
             data_mem_req.data = REG_ZERO_VAL;
             data_mem_req.do_read = create_byte_plane(curr_instr_select, rd_data_to_writeback);
             data_mem_req.do_write = 4'b0000;
-        end else if (current_stage == stage_mem && curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin
+        end else if (current_stage == stage_mem && curr_instr_select >= S_SB && curr_instr_select <= S_SW && data_mem_rsp.valid == 0) begin
+            // Check for data_mem_rsp.valid == 0 is required so memory request only exists while waiting for memory response
+            // This ensures false requests are not generated that are read by the simulator as duplicated writes to stdout / other I/O
             data_mem_req.valid = 1;
             data_mem_req.addr = rd_data_to_writeback;
             data_mem_req.data = write_shift_data_by_offset(curr_instr_select, rd_data_to_writeback, store_data_reg);
@@ -213,7 +215,7 @@ module core (
                 end
                 stage_mem: begin
                     // If instruction is load, we need to update rd_data_to_writeback using data read from memory
-                    if (curr_instr_select < I_LB || curr_instr_select > S_SW)
+                    // if (curr_instr_select < I_LB || curr_instr_select > S_SW)
                         // $display("[EXECUTE] Got result %d to return to reg %d", $signed(rd_data_to_writeback), rd_writeback_addr);
 
                     // Handle memory read or write, otherwise continue to writeback
@@ -228,11 +230,11 @@ module core (
                         end
                     end else if (curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin // If writing
                         if (data_mem_rsp.valid == 1) begin
-                            // $display("[MEM] Successfully wrote to address 0x%h", data_mem_rsp.addr);
+                            $display("[MEM] Successfully wrote to address 0x%h", data_mem_rsp.addr);
                             current_stage <= stage_writeback;
                         end else begin
                             current_stage <= stage_mem;
-                            // $display("[MEM] Waiting on write to 0x%h, byte plane %b", data_mem_req.addr, data_mem_req.do_write);
+                            $display("[MEM] Waiting on write to 0x%h, byte plane %b", data_mem_req.addr, data_mem_req.do_write);
                         end
                     end else begin
                         current_stage <= stage_writeback;
@@ -275,7 +277,7 @@ module core (
         word_t sign_extended_imm, sum;
         sign_extended_imm = {{20{instr.imm[11]}}, instr.imm};
         sum = (rs1_data + $signed(sign_extended_imm)) & $signed(-2); // Does this correctly force the LSB to 0?
-        $display("Immediate: %-0h Sum: %-0h RS1: %-0h", sign_extended_imm, sum, rs1_data);
+        // $display("Immediate: %-0h Sum: %-0h RS1: %-0h", sign_extended_imm, sum, rs1_data);
         return sum;
     endfunction
 
@@ -283,7 +285,7 @@ module core (
     function word_t build_branch_pc(b_type_t instr, word_t pc);
         word_t sign_extended_imm;
         sign_extended_imm = {{19{instr.imm12}}, instr.imm12, instr.imm11, instr.imm10_5, instr.imm4_1, 1'b0}; // Add 0 lowest bit to align address
-        $display("Immediate: %-0h", sign_extended_imm);
+        // $display("Immediate: %-0h", sign_extended_imm);
         return pc + $signed(sign_extended_imm);
     endfunction
     
