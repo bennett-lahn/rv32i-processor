@@ -5,7 +5,8 @@
 `include "register_file.sv" // Used for reg_index_t type
 
 // Uses curr_instr_select and register data to execute appropriate instruction, returning reg_data_t result
-function reg_data_t execute_instr(rv32i_instruction_t curr_instr_data, word_t pc, instr_select_t curr_instr_select, reg_data_t rs1_data, reg_data_t rs2_data);
+function reg_data_t execute_instr(rv32i_instruction_t curr_instr_data, word_t pc, instr_select_t curr_instr_select, 
+                                  reg_data_t rs1_data, reg_data_t rs2_data);
     case (curr_instr_select)
         R_ADD:  return execute_add(rs1_data, rs2_data);
         R_SUB:  return execute_sub(rs1_data, rs2_data);
@@ -174,7 +175,7 @@ function reg_data_t execute_sw(s_type_t instr, reg_data_t rs1);
     return rs1 + {{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo};
 endfunction
 
-// Functions for branch instructions evaluate expression and if the expression is true return 1, else return 0
+// Functions for branch instructions evaluate branch expression and if true return 1, else return 0
 
 function reg_data_t execute_beq(reg_data_t rs1, reg_data_t rs2);
     logic result;
@@ -212,11 +213,11 @@ function reg_data_t execute_bgeu(reg_data_t rs1, reg_data_t rs2);
     return {{31{1'b0}}, result};
 endfunction
 
-function reg_data_t execute_lui(u_type_t instr); // TODO: Remove magic numbers for sign extension
+function reg_data_t execute_lui(u_type_t instr); 
     return {instr.imm, {12{1'b0}}};
 endfunction
 
-function reg_data_t execute_auipc(u_type_t instr, word_t pc); // TODO: Remove magic numbers for sign extension
+function reg_data_t execute_auipc(u_type_t instr, word_t pc);
     return pc + {instr.imm, {12{1'b0}}}; 
 endfunction
 

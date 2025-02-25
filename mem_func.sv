@@ -5,8 +5,8 @@
 `include "register_file.sv" // Used for reg_index_t type
 
 // The functions below manipulate memory read/writes by calculating the misalignment between the 4-byte aligned
-// main memory and the requested read/write instruction + addr, appropriately shifting data so it is written to the appropriate byte
-// planes (if a write) or moved into the least significant bytes (if a read)
+// main memory and the requested read/write instruction + addr, appropriately shifting data so it is written 
+// to the appropriate byte planes (if a write) or moved into the least significant bytes (if a read)
 // As the main memory is 4-byte aligned, this is only necessary for halfword/byte instructions
 
 // Return which bytes should be read from memory after 4-byte aligning memory address request
@@ -68,7 +68,7 @@ function reg_data_t read_shift_data_by_offset(instr_select_t curr_instr_select, 
     endcase
 endfunction
 
-// Helper function that compares memory address to 4-byte aligned version and returns numerical difference between the two
+// Helper function that compares memory address to 4-byte aligned version and returns numerical difference
 // Subtract true address from aligned address to get offset to select byte plane
 function mem_offset_t calculate_mem_offset(reg_data_t unaligned_addr);
     logic [31:0] aligned_addr;

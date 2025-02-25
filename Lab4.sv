@@ -11,9 +11,7 @@
 
 // TODO: Replace uses of reg_data_t that aren't used in registers to word
 
-// MEGA TODO: Test JALR seperately / finish JALR test
-
-module core (
+module Lab4 (
     input logic  clk
     ,input logic reset
     ,input logic [`word_address_size-1:0] reset_pc
@@ -111,13 +109,11 @@ module core (
                     pc <= pc + 4;
                 end
            end else if (curr_instr_select == J_JAL) begin
-                // $display("Doing JAL things.");
                 pc <= build_jal_pc(curr_instr_data.j_type, pc);
            end else if (curr_instr_select == I_JALR) begin
-                // $display("Doing JALR things.");
-               pc <= build_jalr_pc(curr_instr_data.i_type, pc, rs1_data_r);
+                pc <= build_jalr_pc(curr_instr_data.i_type, pc, rs1_data_r);
            end else begin
-               pc <= pc + 4;
+                pc <= pc + 4;
            end
        end
           
@@ -197,7 +193,6 @@ module core (
                 end
                 stage_execute: begin
                     current_stage <= stage_mem;
-
                     // $display("[EXECUTE] Executing instruction %s", curr_instr_select.name());
                     // $display("[EXECUTE] If valid: rs1 val %d, rs2 val %d, imm val %d", curr_instr_data.r_type.rs1, curr_instr_data.r_type.rs2, $signed(curr_instr_data.i_type.imm));
 
@@ -214,10 +209,6 @@ module core (
                     // $display("[STAGE] Transitioning to MEM");
                 end
                 stage_mem: begin
-                    // If instruction is load, we need to update rd_data_to_writeback using data read from memory
-                    // if (curr_instr_select < I_LB || curr_instr_select > S_SW)
-                        // $display("[EXECUTE] Got result %d to return to reg %d", $signed(rd_data_to_writeback), rd_writeback_addr);
-
                     // Handle memory read or write, otherwise continue to writeback
                     if (curr_instr_select >= I_LB && curr_instr_select <= I_LHU) begin // If reading
                         if (data_mem_rsp.valid == 1) begin
@@ -229,12 +220,12 @@ module core (
                             current_stage <= stage_mem;
                         end
                     end else if (curr_instr_select >= S_SB && curr_instr_select <= S_SW) begin // If writing
-                        if (data_mem_rsp.valid == 1) begin
-                            $display("[MEM] Successfully wrote to address 0x%h", data_mem_rsp.addr);
+                        if (data_mem_rsp.valid == 1) begin // Ed #144 - data_mem_req.valid should be high in MEM and check data_mem_rsp.valid is high in writeback
+                            // $display("[MEM] Successfully wrote to address 0x%h", data_mem_rsp.addr);
                             current_stage <= stage_writeback;
                         end else begin
                             current_stage <= stage_mem;
-                            $display("[MEM] Waiting on write to 0x%h, byte plane %b", data_mem_req.addr, data_mem_req.do_write);
+                            // $display("[MEM] Waiting on write to 0x%h, byte plane %b", data_mem_req.addr, data_mem_req.do_write);
                         end
                     end else begin
                         current_stage <= stage_writeback;
