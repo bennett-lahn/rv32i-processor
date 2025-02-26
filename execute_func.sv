@@ -4,10 +4,10 @@
 `include "system.sv"
 `include "register_file.sv" // Used for reg_index_t type
 
-// Uses curr_instr_select and register data to execute appropriate instruction, returning reg_data_t result
-function reg_data_t execute_instr(rv32i_instruction_t curr_instr_data, word_t pc, instr_select_t curr_instr_select, 
+// Uses instr_sel and register data to execute appropriate instruction, returning reg_data_t result
+function reg_data_t execute_instr(rv32i_instruction_t curr_instr_data, word_t pc, instr_select_t instr_sel, 
                                   reg_data_t rs1_data, reg_data_t rs2_data);
-    case (curr_instr_select)
+    case (instr_sel)
         R_ADD:  return execute_add(rs1_data, rs2_data);
         R_SUB:  return execute_sub(rs1_data, rs2_data);
         R_AND:  return execute_and(rs1_data, rs2_data);

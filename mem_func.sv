@@ -10,13 +10,13 @@
 // As the main memory is 4-byte aligned, this is only necessary for halfword/byte instructions
 
 // Return which bytes should be read from memory after 4-byte aligning memory address request
-function logic [3:0] create_byte_plane(instr_select_t curr_instr_select, reg_data_t mem_addr);
+function logic [3:0] create_byte_plane(instr_select_t instr_sel, reg_data_t mem_addr);
     mem_offset_t byte_offset;
     byte_offset = calculate_mem_offset(mem_addr);
     // $display("[MEM] Calculated misalignment for byte plane is %d for addr 0x%h", byte_offset, data_mem_req.addr);
-    if (curr_instr_select == I_LW || curr_instr_select == S_SW) begin
+    if (instr_sel == I_LW || instr_sel == S_SW) begin
         return 4'b1111;
-    end else if (curr_instr_select == I_LB || curr_instr_select == I_LBU || curr_instr_select == S_SB) begin
+    end else if (instr_sel == I_LB || instr_sel == I_LBU || instr_sel == S_SB) begin
         case (byte_offset)
             ZERO:    return 4'b0001;
             ONE:     return 4'b0010;
@@ -24,7 +24,7 @@ function logic [3:0] create_byte_plane(instr_select_t curr_instr_select, reg_dat
             THREE:   return 4'b1000;
             default: return 4'b0000; // Should never happen
         endcase
-    end else if (curr_instr_select == I_LH || curr_instr_select == I_LHU || curr_instr_select == S_SH) begin
+    end else if (instr_sel == I_LH || instr_sel == I_LHU || instr_sel == S_SH) begin
         case (byte_offset)
             ZERO:    return 4'b0011;
             ONE:     return 4'b0110;
@@ -37,9 +37,9 @@ function logic [3:0] create_byte_plane(instr_select_t curr_instr_select, reg_dat
 endfunction
 
 // Shift data into appropriate bytes depending on which byte planes are going to be written to
-function reg_data_t write_shift_data_by_offset(instr_select_t curr_instr_select, reg_data_t mem_addr, reg_data_t data);
+function reg_data_t write_shift_data_by_offset(instr_select_t instr_sel, reg_data_t mem_addr, reg_data_t data);
     logic [3:0] byte_plane;
-    byte_plane = create_byte_plane(curr_instr_select, mem_addr);
+    byte_plane = create_byte_plane(instr_sel, mem_addr);
     case (byte_plane)
         4'b0001: return data;
         4'b0010: return data << BYTE;
@@ -53,9 +53,9 @@ function reg_data_t write_shift_data_by_offset(instr_select_t curr_instr_select,
 endfunction
 
 // Shift data into lowest bytes depending on which byte planes were read by memory, return shifted value
-function reg_data_t read_shift_data_by_offset(instr_select_t curr_instr_select, reg_data_t mem_addr, reg_data_t data);
+function reg_data_t read_shift_data_by_offset(instr_select_t instr_sel, reg_data_t mem_addr, reg_data_t data);
     logic [3:0] byte_plane;
-    byte_plane = create_byte_plane(curr_instr_select, mem_addr);
+    byte_plane = create_byte_plane(instr_sel, mem_addr);
     case (byte_plane)
         4'b0001: return data;
         4'b0010: return data >> BYTE;
@@ -77,11 +77,11 @@ function mem_offset_t calculate_mem_offset(reg_data_t unaligned_addr);
 endfunction
 
 // Given current load instruction memory rsp, return sign/zero extended memory response according to instruction
-function reg_data_t interpret_read_memory_rsp(instr_select_t curr_instr_select, memory_io_rsp32 data_mem_rsp);
+function reg_data_t interpret_read_memory_rsp(instr_select_t instr_sel, memory_io_rsp32 data_mem_rsp);
     reg_data_t temp;
     // Call shift data to move rsp data into proper LSB(s)
-    temp = read_shift_data_by_offset(curr_instr_select, data_mem_rsp.addr, data_mem_rsp.data);
-    case (curr_instr_select)
+    temp = read_shift_data_by_offset(instr_sel, data_mem_rsp.addr, data_mem_rsp.data);
+    case (instr_sel)
         I_LB:     return reg_data_t'({{24{temp[7]}}, temp[7:0]});
         I_LH:     return reg_data_t'({{16{temp[15]}}, temp[15:0]});
         I_LW:     return temp;

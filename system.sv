@@ -9,7 +9,7 @@
 
 `define user_tag_size 16
 
-// This file contains basic types used by the processor to define/decode instructions
+// These localparams/structs are basic types used by the processor to define/decode instructions
 // Specific types for registers are found in register_file.sv
 
 typedef logic[`word_size - 1:0] word_t;
@@ -190,8 +190,7 @@ typedef enum logic [2:0] {
     INSTR_UNKNOWN = 3'd6
 } instr_type_t;
 
-// Decoded instructions translated into this type, used to pick right instruction
-// in execute stage
+// Decoded instructions translated into this type, used to pick right instruction in execute stage
 typedef enum logic [5:0] {
     R_ADD
     ,R_SUB
@@ -246,5 +245,89 @@ typedef enum logic [31:0] {
     ,TWO
     ,THREE
 } mem_offset_t;
+
+// Pipeline types/structs
+// These types are used to manage data in each pipeline stage
+// They should always be registered
+
+// Pipeline register type for the Fetch stage
+typedef struct packed {
+    logic               valid;      // Indicates if the fetched instruction is valid
+    rv32i_instruction_t instr_data; // The complete instruction
+    word_t              pc;         // Program counter carried over
+} fetch_pipe_t;
+
+// Pipeline register type for the Decode stage
+typedef struct packed {
+    logic               valid;      // Indicates if the decode stage holds a valid instruction
+    rv32i_instruction_t instr_data; // The complete instruction
+    word_t              pc;         // Program counter carried over
+    instr_select_t      instr_sel;  // Decoded instruction selection
+} decode_pipe_t;
+
+// Pipeline register type for the Execute stage
+typedef struct packed {
+    logic               valid;      // Valid bit for the stage
+    rv32i_instruction_t instr_data; // The complete instruction
+    word_t              pc;         // Program counter carried over
+    instr_select_t      instr_sel;  // Decoded instruction selection
+    reg_data_t          rs1_data;   // Data read from rs1
+    reg_data_t          rs2_data;   // Data read from rs2
+    reg_data_t          wb_data;    // Computed result for writeback
+    logic               wb_en;      // Writeback enable signal
+    reg_index_t         wb_addr;    // Writeback register address (destination)
+} execute_pipe_t;
+
+// Pipeline register type for the Memory stage (prior to writeback)
+typedef struct packed {
+    logic               valid;      // Valid bit for the stage
+    rv32i_instruction_t instr_data; // The complete instruction
+    word_t              pc;         // Program counter
+    instr_select_t      instr_sel;  // Decoded instruction selection
+    reg_data_t          rs1_data;   // rs1 data (e.g., for JALR target calculation)
+    reg_data_t          wb_data;    // Computed result for writeback (e.g., data from memory)
+    logic               wb_en;      // Writeback enable signal
+    reg_index_t         wb_addr;    // Writeback register address
+} mem_pipe_t;
+
+// Used to reset pipeline registers
+
+localparam fetch_pipe_t FETCH_RESET = '{
+    valid: 1'b0
+    ,instr_data: '0
+    ,pc: '0
+};
+
+localparam decode_pipe_t DECODE_RESET = '{
+    valid: 1'b0
+    ,instr_data: '0
+    ,pc: '0
+    ,instr_sel: X_UNKNOWN
+};
+
+// RESET: Pipeline register reset type for the Execute stage (prior to writeback)
+localparam execute_pipe_t EXECUTE_RESET = '{
+    valid: 1'b0
+    ,instr_data: '0
+    ,pc: '0
+    ,instr_sel: X_UNKNOWN
+    ,rs1_data: '0
+    ,rs2_data: '0
+    ,wb_data: '0
+    ,wb_en: 1'b0
+    ,wb_addr: REG_ZERO
+};
+
+// RESET: Pipeline register reset type for the Memory stage
+localparam mem_pipe_t MEM_RESET = '{
+    valid: 1'b0
+    ,instr_data: '0
+    ,pc: '0
+    ,instr_sel: X_UNKNOWN
+    ,rs1_data: '0
+    ,wb_data: '0
+    ,wb_en: 1'b0
+    ,wb_addr: REG_ZERO
+};
 
 `endif
