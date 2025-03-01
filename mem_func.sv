@@ -4,6 +4,8 @@
 `include "system.sv"
 `include "register_file.sv" // Used for reg_index_t type
 
+// This file contains functions used for store/load instructions
+
 // The functions below manipulate memory read/writes by calculating the misalignment between the 4-byte aligned
 // main memory and the requested read/write instruction + addr, appropriately shifting data so it is written 
 // to the appropriate byte planes (if a write) or moved into the least significant bytes (if a read)

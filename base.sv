@@ -1,3 +1,7 @@
+// DEPRECATED
+// Merged with system.sv
+// Only used on labs before lab 5
+
 `ifndef _base_
 `define _base_
 

@@ -1,3 +1,6 @@
+// This file contains the types and localparams used by other files
+// They are generally organized by usecase
+
 `ifndef _system_
 `define _system_
 
@@ -8,6 +11,13 @@
 `define word_address_size_bytes (`word_address_size/8)
 
 `define user_tag_size 16
+
+// Useful macros to make the code more readable
+localparam TRUE = 1'b1;
+localparam FALSE = 1'b0;
+localparam ONE = 1'b1;
+localparam ZERO = 1'b0;
+localparam BYTE = 8;
 
 // These localparams/structs are basic types used by the processor to define/decode instructions
 // Specific types for registers are found in register_file.sv
@@ -141,13 +151,13 @@ typedef struct packed {
 
 // B-Type Instruction Encoding
 typedef struct packed {
-    logic imm11;           // Bit [31] (immediate bit 11)
+    logic imm12;           // Bit [31] (immediate bit 12)
     logic [5:0] imm10_5;   // Bits [30:25] (immediate bits 10:5)
     reg_index_t rs2;       // Bits [24:20]
     reg_index_t rs1;       // Bits [19:15]
     funct3_t funct3;       // Bits [14:12]
     logic [3:0] imm4_1;    // Bits [11:8] (immediate bits 4:1)
-    logic imm12;           // Bit [7] (immediate bit 12)
+    logic imm11;           // Bit [7] (immediate bit 11)
     opcode_t opcode;       // Bits [6:0]
 } b_type_t;
 
