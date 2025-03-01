@@ -57,12 +57,6 @@ module core (
     assign register_io.read_reg_addr_1 = update_rs1_addr(decode_pipe.instr_data);
     assign register_io.read_reg_addr_2 = update_rs2_addr(decode_pipe.instr_data);
 
-    // Comparison signal for execute stage; true if instruction in mem stage is a branch or jump
-    logic decode_is_branch;
-    logic decode_is_jump;
-    assign decode_is_branch = decoded_instr >= B_BEQ && decoded_instr <= B_BGEU;
-    assign decode_is_jump = decoded_instr == J_JAL || decoded_instr == I_JALR;
-
     // Comparison signal for mem stage; true if instruction in mem stage is a load
     logic execute_pipe_is_load;
     assign execute_pipe_is_load = execute_pipe.instr_sel >= I_LB && execute_pipe.instr_sel <= I_LHU;
@@ -80,6 +74,15 @@ module core (
     // (I assume combining a function call used in multiple places will (maybe) make synthesis more efficient)
     instr_select_t decoded_instr;
     assign decoded_instr = parse_instruction(fetch_pipe.instr_data);
+
+    // True if branch misprediction occurred, PC must be overwritten, pipeline flushed of bad instr
+    logic branch_mispredicted; // TODO: needs 3 states: MISPREDICT, PREDICT, NOT BRANCH
+    // New PC if branch was mispredicted
+    logic pc_override;
+
+    // True if corresponding processor stage needs to be flushed due to branching
+    // flush_instr_mem indicates that the next instr from memory is invalid
+    logic flush_instr_mem, flush_fetch, flush_decode;
 
     // Result from executing instruction in execute stage
     logic alu_result;
@@ -117,36 +120,53 @@ module core (
         if (reset)
             pc <= reset_pc;
         else if (update_pc) 
-            pc <= new_pc_val;
+            pc <= new_pc_val + 4; // new_pc_val is directly fed to mem in this case to avoid delay, so skip to next instr
         else
             pc <= pc + 4;
     end
 
     // Program counter logic
     // Update master program counter if jump/branch instruction triggers
-    // Send signal to flush pipeline?
-    // Branch prediction? "backwards taken, fowards not taken"
-    // NOTE: SHOULD USE FETCH PIPE, NOT DECODE PIPE
+    // Branch prediction: "backwards taken, fowards not taken"
+    // Prefers updating pc to correct mispredict to predicting more branches as fetched instruction would be invalid
     always_comb begin
-        if (decode_pipe.valid && decode_is_branch) begin
-            if (predict_branch_taken()) begin
-                update_pc = TRUE;
-                new_pc_val = 
-            end
-        end else if (decode_pipe.valid && decode_is_jump) begin
+        if (branch_mispredicted) begin
             update_pc = TRUE;
-            new_pc_val = alu_result;
+            new_pc_val = pc_override;
+        end else if (fetch_pipe.valid && is_branch(decoded_instr)) begin
+            if (predict_branch_taken(fetch_pipe.instr_data.b_type)) begin
+                update_pc = TRUE;
+                new_pc_val = build_branch_pc(fetch_pipe.instr_data.b_type, pc);
+            end else begin
+                update_pc = FALSE;
+                new_pc_val = REG_ZERO_VAL;
+            end
+        end else if (fetch_pipe.valid && is_jump(decoded_instr)) begin
+            update_pc = TRUE;
+            new_pc_val = (decoded_instr == J_JAL) ? build_jal_pc(fetch_pipe.instr_data.j_type, fetch_pipe.pc) : 
+                                                    build_jalr_pc(fetch_pipe.instr_data.j_type, fetch_pipe.pc);
         end else begin
             update_pc = FALSE;
             new_pc_val = REG_ZERO_VAL;
         end
     end
 
-    // Need some sort of logic that checks previous fetched instructions for correctness upon branch reaching execute
+    // Branch misprediction logic
+    // If predict_branch_taken output does not match branch evaluation from ALU, flush pipeline and update PC
+    // TODO: Set proper invalid bits
+    always_comb begin
+        if (is_branch(decode_pipe.instr_sel) && (predict_branch_taken(decode_pipe.instr_data.b_type) != alu_result)) begin
+            branch_mispredicted = TRUE;
+            pc_override = build_branch_pc(decode_pipe.instr_data.b_type, decode_pipe.pc);
+        end else begin
+            branch_mispredicted = FALSE;
+            pc_override = REG_ZERO_VAL;
+        end
+    end
 
     // Instruction memory request logic for fetch stage
     assign instr_mem_req.valid = 1;
-    assign instr_mem_req.addr = pc;
+    assign instr_mem_req.addr = ()
     assign instr_mem_req.do_read  = 4'b1111;
     assign instr_mem_req.do_write = 4'b0000;
 
@@ -187,12 +207,16 @@ module core (
             fetch_pipe <= FETCH_RESET;
         end else begin
             if (instr_mem_rsp.valid) begin
-                fetch_pipe.valid <= TRUE;
+                // If decoded instr is jump, next mem response after is invalid due to memory latency
+                if (branch_mispredicted || decoded_instr == J_JAL || decoded_instr == I_JALR) // TODO: IS THIS CORRECT
+                    fetch_pipe.valid <= FALSE;
+                else
+                    fetch_pipe.valid <= TRUE;
                 fetch_pipe.instr_data <= instr_mem_rsp.data;
             end else begin
                 fetch_pipe.valid <= FALSE;
             end
-            fetch_pipe.pc <= pc - 4; // Will probably need more advanced logic here to handle branching
+            fetch_pipe.pc <= pc - 4; // TODO: Update for speculative branch mispred, where this isn't always true
         end
     end
 
@@ -257,42 +281,6 @@ module core (
     assign register_io.write_enable = (mem_pipe.valid && (mem_pipe.wb_en || mem_pipe_is_load)) ? TRUE : FALSE;
     // TODO: What to do if memory response isn't valid when mem_pipe_is_load is valid? Ans: have to stall somehow
 
-    // Returns new program counter value by adding sign-extended j-type immediate to current program counter value
-    function word_t build_jal_pc(j_type_t instr, word_t pc);
-        word_t offset, sum;
-        // Add 0 lowest bit to align address
-        offset = {{11{instr.imm20}}, instr.imm20, instr.imm19_12, instr.imm11, instr.imm10_1, 1'b0}; 
-        sum = pc + $signed(offset);
-        return {sum[31:1], 1'b0}; // Set lowest bit to 0 to align address
-    endfunction
-
-    // Returns new program counter value by adding rs1 value + sign-extended immediate
-    // Problem: rs1_data is only valid during execute stage
-    function word_t build_jalr_pc(i_type_t instr, word_t pc, reg_data_t rs1_data);
-        word_t sign_extended_imm, sum;
-        sign_extended_imm = {{20{instr.imm[11]}}, instr.imm};
-        sum = (rs1_data + $signed(sign_extended_imm)) & $signed(-2);
-        return sum;
-    endfunction
-
-    // Returns new program counter value by adding branch offset to current program counter value
-    function word_t build_branch_pc(b_type_t instr, word_t pc);
-        word_t sign_extended_imm;
-        // Add 0 lowest bit to align address
-        sign_extended_imm = {{19{instr.imm12}}, instr.imm12, instr.imm11, instr.imm10_5, instr.imm4_1, 1'b0};
-        return pc + $signed(sign_extended_imm);
-    endfunction
-
-    // Returns whether the pc should be speculatively updated to take the decoded branch or not
-    // BTFNT strategy: If the branch offset is negative based on sign bit (i.e., branch target is behind PC),
-    // then predict that the branch will be taken
-    function logic predict_branch_taken(b_type_t b_instr);
-        return (b_instr.imm12 == 1'b1);
-    endfunction
-
-endfunction
-
-    
 endmodule
 
 `endif
