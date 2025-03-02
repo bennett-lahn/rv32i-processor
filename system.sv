@@ -4,19 +4,23 @@
 `ifndef _system_
 `define _system_
 
+// Used for reg_data_t type
+`include "register_file.sv"
+
 `define word_size 32
 `define word_address_size 32
 
 `define word_size_bytes (`word_size/8)
 `define word_address_size_bytes (`word_address_size/8)
 
+// WARNING: DO NOT CHANGE WITHOUT CHANGING MEM_TAG_T AND TAG_ZERO SIZE BELOW
 `define user_tag_size 16
+typedef logic [15:0] mem_tag_t; // Used in mem stage to differentiate memory accesses
+localparam TAG_ZERO = 16'b0;
 
 // Useful macros to make the code more readable
 localparam TRUE = 1'b1;
 localparam FALSE = 1'b0;
-localparam ONE = 1'b1;
-localparam ZERO = 1'b0;
 localparam BYTE = 8;
 localparam REG_TRUE = 32'd1;  // TRUE, but for reg_data_t types
 localparam REG_FALSE = 32'd0; // FALSE, but for reg_data_t types
@@ -117,7 +121,7 @@ localparam logic [6:0] OPCODE_JAL = 7'b1101111; // J-Type instruction (JAL)
 typedef logic [6:0] opcode_t;    // 7-bit opcode field
 typedef logic [2:0] funct3_t;    // 3-bit funct3 field
 typedef logic [6:0] funct7_t;    // 7-bit funct7 field
-typedef logic [4:0] reg_index_t; // 5-bit register index (rd, rs1, rs2)
+// reg_index_t type included in register_file.sv; encodes rd, rs1, rs2
 typedef logic [11:0] imm12_t;    // 12-bit immediate (I-type, S-type, B-type)
 typedef logic [19:0] imm20_t;    // 20-bit immediate (U-type, J-type)
 typedef logic [31:0] instruction_t; // Full 32-bit instruction
@@ -193,13 +197,13 @@ typedef union packed {
 
 // ENUM type used by debug_decode_opcode and debug_parse_instruction to pick appropriate instr type
 typedef enum logic [2:0] {
-    INSTR_R_TYPE = 3'd0,
-    INSTR_I_TYPE = 3'd1,
-    INSTR_S_TYPE = 3'd2,
-    INSTR_B_TYPE = 3'd3,
-    INSTR_U_TYPE = 3'd4,
-    INSTR_J_TYPE = 3'd5,
-    INSTR_UNKNOWN = 3'd6
+    INSTR_R_TYPE = 3'd0
+    ,INSTR_I_TYPE = 3'd1
+    ,INSTR_S_TYPE = 3'd2
+    ,INSTR_B_TYPE = 3'd3
+    ,INSTR_U_TYPE = 3'd4
+    ,INSTR_J_TYPE = 3'd5
+    ,INSTR_UNKNOWN = 3'd6
 } instr_type_t;
 
 // Decoded instructions translated into this type, used to pick right instruction in execute stage
@@ -285,6 +289,7 @@ typedef struct packed {
     instr_select_t      instr_sel;  // Decoded instruction selection
     reg_data_t          rs1_data;   // Data read from rs1
     reg_data_t          rs2_data;   // Data read from rs2
+    mem_tag_t           user_tag;     // Used to differentiate memory accesses
     reg_data_t          wb_data;    // Computed result for writeback
     logic               wb_en;      // Writeback enable signal
     reg_index_t         wb_addr;    // Writeback register address (destination)
@@ -304,42 +309,42 @@ typedef struct packed {
 
 // Used to reset pipeline registers
 
-localparam fetch_pipe_t FETCH_RESET = '{
-    valid: 1'b0
-    ,instr_data: '0
-    ,pc: '0
-};
+// localparam fetch_pipe_t FETCH_RESET = '{
+//     valid: 1'b0, // '0 may not be allowed
+//     instr_data: 32'b0,
+//     pc: 32'b0
+// };
 
-localparam decode_pipe_t DECODE_RESET = '{
-    valid: 1'b0
-    ,instr_data: '0
-    ,pc: '0
-    ,instr_sel: X_UNKNOWN
-};
+// localparam decode_pipe_t DECODE_RESET = '{
+//     valid: '0
+//     ,instr_data: '0
+//     ,pc: '0
+//     ,instr_sel: X_UNKNOWN
+// };
 
-// RESET: Pipeline register reset type for the Execute stage (prior to writeback)
-localparam execute_pipe_t EXECUTE_RESET = '{
-    valid: 1'b0
-    ,instr_data: '0
-    ,pc: '0
-    ,instr_sel: X_UNKNOWN
-    ,rs1_data: '0
-    ,rs2_data: '0
-    ,wb_data: '0
-    ,wb_en: 1'b0
-    ,wb_addr: REG_ZERO
-};
+// // RESET: Pipeline register reset type for the Execute stage (prior to writeback)
+// localparam execute_pipe_t EXECUTE_RESET = '{
+//     valid: '0
+//     ,instr_data: '0
+//     ,pc: '0
+//     ,instr_sel: X_UNKNOWN
+//     ,rs1_data: '0
+//     ,rs2_data: '0
+//     ,wb_data: '0
+//     ,wb_en: 1'b0
+//     ,wb_addr: REG_ZERO
+// };
 
-// RESET: Pipeline register reset type for the Memory stage
-localparam mem_pipe_t MEM_RESET = '{
-    valid: 1'b0
-    ,instr_data: '0
-    ,pc: '0
-    ,instr_sel: X_UNKNOWN
-    ,rs1_data: '0
-    ,wb_data: '0
-    ,wb_en: 1'b0
-    ,wb_addr: REG_ZERO
-};
+// // RESET: Pipeline register reset type for the Memory stage
+// localparam mem_pipe_t MEM_RESET = '{
+//     valid: '0
+//     ,instr_data: '0
+//     ,pc: '0
+//     ,instr_sel: X_UNKNOWN
+//     ,rs1_data: '0
+//     ,wb_data: '0
+//     ,wb_en: 1'b0
+//     ,wb_addr: REG_ZERO
+// };
 
 `endif
