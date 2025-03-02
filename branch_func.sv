@@ -2,6 +2,8 @@
 `define _branch_func_
 `include "system.sv"
 
+// This file contains functions related to branching, jumping, branch prediction, and the program counter
+
 // Returns new program counter value by adding sign-extended j-type immediate to current program counter value
 function word_t build_jal_pc(j_type_t instr, word_t pc);
     word_t offset, sum;

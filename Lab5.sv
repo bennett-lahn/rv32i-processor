@@ -53,9 +53,9 @@ module core (
 
     // Register reads
     // Continuously update register read based on current instruction rs1/rs2
-    // This means rs1/rs2 data from *these variables* ONLY VALID FOR EXECUTE STAGE
-    assign register_io.read_reg_addr_1 = update_rs1_addr(decode_pipe.instr_data);
-    assign register_io.read_reg_addr_2 = update_rs2_addr(decode_pipe.instr_data);
+    // This means rs1/rs2 data logic variables ONLY VALID FOR EXECUTE and completely unknown before EXECUTE
+    assign register_io.read_reg_addr_1 = update_rs1_addr(fetch_pipe.instr_data);
+    assign register_io.read_reg_addr_2 = update_rs2_addr(fetch_pipe.instr_data);
 
     // Comparison signal for mem stage; true if instruction in mem stage is a load
     logic execute_pipe_is_load;
@@ -82,40 +82,16 @@ module core (
 
     // True if corresponding processor stage needs to be flushed due to branching
     // flush_instr_mem indicates that the next instr from memory is invalid
-    logic flush_instr_mem, flush_fetch, flush_decode;
+    // flush_instr_mem_latched is used to execuute flush_instr_mem in the fetch stage, since instr can't be flushed before mem returns it
+    logic flush_instr_mem, flush_instr_mem_latched, flush_fetch, flush_decode;
 
     // Result from executing instruction in execute stage
-    logic alu_result;
+    reg_data_t alu_result;
     assign alu_result = execute_instr(decode_pipe.instr_data, decode_pipe.pc, decode_pipe.instr_sel, 
                                       register_io.read_data_1, register_io.read_data_2);
 
-    // Program counter control
-    // pc represents the master pc, not the pc for each pipeline stage
-    // TODO: Basic branch prediction, processor decides whether to flush previous pipes only if wrong pc on branch
-    // LAB 5 NOTE: NEEDS RS1 VALUE FOR JALR
-    // LAB 5 NOTE: Redo use of execute_instr (reuse/store signal some other way)
-    always @(posedge clk) begin
-       if (reset)
-          pc <= reset_pc;
-       if (current_stage == stage_writeback) begin
-           if (instr_sel > S_SW && instr_sel < U_LUI) begin
-                if (data_to_wb == 32'd1) begin
-                    pc <= build_branch_pc(curr_instr_data.b_type, pc);
-                end else begin
-                    pc <= pc + 4;
-                end
-           end else if (instr_sel == J_JAL) begin
-                pc <= build_jal_pc(curr_instr_data.j_type, pc);
-           end else if (instr_sel == I_JALR) begin
-                pc <= build_jalr_pc(curr_instr_data.i_type, pc, rs1_data_r);
-           end else begin
-                pc <= pc + 4;
-           end
-       end 
-    end
-
     // Main program counter sequential logic
-    // Remember that master PC represents what is fetched in the NEXT clock cycle
+    // Remember that main pc represents what is fetched in the NEXT clock cycle
     always_ff @(posedge clk) begin
         if (reset)
             pc <= reset_pc;
@@ -136,37 +112,70 @@ module core (
         end else if (fetch_pipe.valid && is_branch(decoded_instr)) begin
             if (predict_branch_taken(fetch_pipe.instr_data.b_type)) begin
                 update_pc = TRUE;
-                new_pc_val = build_branch_pc(fetch_pipe.instr_data.b_type, pc);
+                new_pc_val = build_branch_pc(fetch_pipe.instr_data.b_type, fetch_pipe.pc);
             end else begin
                 update_pc = FALSE;
                 new_pc_val = REG_ZERO_VAL;
             end
-        end else if (fetch_pipe.valid && is_jump(decoded_instr)) begin
-            update_pc = TRUE;
-            new_pc_val = (decoded_instr == J_JAL) ? build_jal_pc(fetch_pipe.instr_data.j_type, fetch_pipe.pc) : 
-                                                    build_jalr_pc(fetch_pipe.instr_data.j_type, fetch_pipe.pc);
         end else begin
             update_pc = FALSE;
             new_pc_val = REG_ZERO_VAL;
         end
     end
 
-    // Branch misprediction logic
-    // If predict_branch_taken output does not match branch evaluation from ALU, flush pipeline and update PC
-    // TODO: Set proper invalid bits
+    // Branch misprediction (and jump flush) logic, operating in EXECUTE stage
+    // If predict_branch_taken output does not match branch evaluation from ALU, flush pipeline and **update PC**
+    // TODO: Handle flush signals
     always_comb begin
-        if (is_branch(decode_pipe.instr_sel) && (predict_branch_taken(decode_pipe.instr_data.b_type) != alu_result)) begin
-            branch_mispredicted = TRUE;
-            pc_override = build_branch_pc(decode_pipe.instr_data.b_type, decode_pipe.pc);
+        if (decode_pipe.valid & is_branch(decode_pipe.instr_sel) begin
+            // Case 1: Predict branch taken (correct); only flush decode
+            if (predict_branch_taken(decode_pipe.instr_data.b_type) && alu_result == REG_TRUE) begin 
+                branch_mispredicted = FALSE;
+                pc_override = FALSE;
+                flush_decode = TRUE;
+                flush_fetch = FALSE;
+                flush_instr_mem = FALSE;
+            // Case 2: Predict branch taken (incorrect); flush fetch and next instr from memory
+            end else if (predict_branch_taken(decode_pipe.instr_data.b_type) && alu_result != REG_TRUE) begin
+                branch_mispredicted = TRUE;
+                pc_override = build_branch_pc(decode_pipe.instr_data.b_type, decode_pipe.pc);
+                flush_decode = FALSE;
+                flush_fetch = TRUE;
+                flush_instr_mem = TRUE;
+            // Case 3: Predict branch not taken (incorrect); flush decode, fetch, and next instr from memory
+            end else if (!predict_branch_taken(decode_pipe.instr_data.b_type) && alu_result == REG_TRUE) begin
+                branch_mispredicted = TRUE;
+                pc_override = build_branch_pc(decode_pipe.instr_data.b_type, decode_pipe.pc);
+                flush_decode = TRUE;
+                flush_fetch = TRUE;
+                flush_instr_mem = TRUE;
+            // Case 4: Predict branch not taken (correct); do not flush anything, as PC is not modified by predictor or branch    
+            end else begin
+                branch_mispredicted = FALSE;
+                pc_override = REG_ZERO_VAL;
+                flush_decode = FALSE;
+                flush_fetch = FALSE;
+                flush_instr_mem = FALSE;
+            end
+        end else if (decode_pipe.valid & is_jump(decode_pipe.instr_sel)) begin 
+            branch_mispredicted = TRUE; // Misnomer because not a branch, but equivalent to Case 3 in effect
+            pc_override = (decode_pipe.instr_sel == J_JAL) ? build_jal_pc(decode_pipe.instr_data.j_type, decode_pipe.pc) : 
+                                                             build_jalr_pc(decode_pipe.instr_data.i_type, decode_pipe.pc, rs1_data);
+            flush_decode = TRUE;
+            flush_fetch = TRUE;
+            flush_instr_mem = TRUE;
         end else begin
             branch_mispredicted = FALSE;
             pc_override = REG_ZERO_VAL;
+            flush_decode = FALSE;
+            flush_fetch = FALSE;
+            flush_instr_mem = FALSE;
         end
     end
 
     // Instruction memory request logic for fetch stage
     assign instr_mem_req.valid = 1;
-    assign instr_mem_req.addr = ()
+    assign instr_mem_req.addr = (update_pc) ? new_pc_val : pc;
     assign instr_mem_req.do_read  = 4'b1111;
     assign instr_mem_req.do_write = 4'b0000;
 
@@ -201,6 +210,17 @@ module core (
     // Pipeline sequential logic
     // Each pipeline stage has a synchronized reset, pipeline registers between stages
 
+    // Sequential logic for flush_instr_mem
+    // Used to perform the flush when the instr comes into fetch, since it can't be flushed before memory returns it
+    always_ff @(posedge clk) begin
+        if (reset)
+            flush_instr_mem_latched <= FALSE;
+        else if (flush_instr_mem)
+            flush_instr_mem_latched <= TRUE;
+        else
+            flush_instr_mem_latched <= FALSE;
+    end
+
     // Fetch stage sequential logic
     always_ff @(posedge clk) begin
         if (reset) begin
@@ -208,7 +228,7 @@ module core (
         end else begin
             if (instr_mem_rsp.valid) begin
                 // If decoded instr is jump, next mem response after is invalid due to memory latency
-                if (branch_mispredicted || decoded_instr == J_JAL || decoded_instr == I_JALR) // TODO: IS THIS CORRECT
+                if (flush_instr_mem_latched || flush_fetch || decoded_instr == J_JAL || decoded_instr == I_JALR) // TODO: IS THIS CORRECT
                     fetch_pipe.valid <= FALSE;
                 else
                     fetch_pipe.valid <= TRUE;
@@ -225,7 +245,7 @@ module core (
         if (reset) begin
             decode_pipe <= DECODE_RESET;
         end else begin
-            decode_pipe.valid <= fetch_pipe.valid;
+            decode_pipe.valid <= (flush_decode) ? FALSE : fetch_pipe.valid;
             decode_pipe.instr_data <= fetch_pipe.instr_data;
             decode_pipe.pc <= fetch_pipe.pc;
             decode_pipe.instr_sel <= decoded_instr;

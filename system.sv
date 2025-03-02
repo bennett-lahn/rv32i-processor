@@ -18,6 +18,8 @@ localparam FALSE = 1'b0;
 localparam ONE = 1'b1;
 localparam ZERO = 1'b0;
 localparam BYTE = 8;
+localparam REG_TRUE = 32'd1;  // TRUE, but for reg_data_t types
+localparam REG_FALSE = 32'd0; // FALSE, but for reg_data_t types
 
 // These localparams/structs are basic types used by the processor to define/decode instructions
 // Specific types for registers are found in register_file.sv
