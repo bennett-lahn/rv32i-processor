@@ -55,6 +55,7 @@ module memory32 #(
                     rsp.addr <= req.addr;
                 rsp.valid <= 1'b1;
                 rsp.user_tag <= req.user_tag;
+                $display("DOING READ!!! IS VALID REQ %d, READ %d from %d", req.valid, {data0[req.addr[size_l2 - 1:2]], data1[req.addr[size_l2 - 1:2]], data2[req.addr[size_l2 - 1:2]], data3[req.addr[size_l2 - 1:2]]}, req.addr);
                 rsp.data[7:0] <= data0[req.addr[size_l2 - 1:2]];
                 rsp.data[15:8] <= data1[req.addr[size_l2 - 1:2]];
                 rsp.data[23:16] <= data2[req.addr[size_l2 - 1:2]];
@@ -64,6 +65,7 @@ module memory32 #(
                     rsp.addr <= req.addr;
                 rsp.valid <= 1'b1;
                 rsp.user_tag <= req.user_tag;
+                $display("DOING WRITE!!! IS VALID REQ %d, WROTE %d TO %d", req.valid, req.data, req.addr);
                 if (req.do_write[0]) data0[req.addr[size_l2 - 1:2]] <= req.data[7:0];
                 if (req.do_write[1]) data1[req.addr[size_l2 - 1:2]] <= req.data[15:8];
                 if (req.do_write[2]) data2[req.addr[size_l2 - 1:2]] <= req.data[23:16];
@@ -84,14 +86,3 @@ endmodule
 `endif
 
 `endif
-
-// Implementing byte/halfword reads/writes
-
-// 4'b0011, least significant byte goes in first address,
-// second least significant byte goes in second address
-// Least significant byte of read byte select is LSB of memory word, 4'b001 <-- Write to only LSB
-// req.do_write[0] is LSB of 4'bXXXX
-
-// For reads:
-// Must overwrite bytes that are not supposed to be included in read
-// This is accomplished by interpret_read_memory_rsp

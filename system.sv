@@ -307,44 +307,4 @@ typedef struct packed {
     reg_index_t         wb_addr;    // Writeback register address
 } mem_pipe_t;
 
-// Used to reset pipeline registers
-
-// localparam fetch_pipe_t FETCH_RESET = '{
-//     valid: 1'b0, // '0 may not be allowed
-//     instr_data: 32'b0,
-//     pc: 32'b0
-// };
-
-// localparam decode_pipe_t DECODE_RESET = '{
-//     valid: '0
-//     ,instr_data: '0
-//     ,pc: '0
-//     ,instr_sel: X_UNKNOWN
-// };
-
-// // RESET: Pipeline register reset type for the Execute stage (prior to writeback)
-// localparam execute_pipe_t EXECUTE_RESET = '{
-//     valid: '0
-//     ,instr_data: '0
-//     ,pc: '0
-//     ,instr_sel: X_UNKNOWN
-//     ,rs1_data: '0
-//     ,rs2_data: '0
-//     ,wb_data: '0
-//     ,wb_en: 1'b0
-//     ,wb_addr: REG_ZERO
-// };
-
-// // RESET: Pipeline register reset type for the Memory stage
-// localparam mem_pipe_t MEM_RESET = '{
-//     valid: '0
-//     ,instr_data: '0
-//     ,pc: '0
-//     ,instr_sel: X_UNKNOWN
-//     ,rs1_data: '0
-//     ,wb_data: '0
-//     ,wb_en: 1'b0
-//     ,wb_addr: REG_ZERO
-// };
-
 `endif

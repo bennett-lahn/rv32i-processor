@@ -9,9 +9,6 @@
 `include "branch_func.sv"
 `include "register_file.sv"
 
-// TODO: Fix memory read/writes w/o hazards; need to stall for memory requests (reads and writes or just reads?)
-// If there are two loads back to back, need some way to differentiate them
-
 module core (
     input logic  clk
     ,input logic reset
@@ -90,13 +87,6 @@ module core (
     logic mem_pipe_is_load;
     assign mem_pipe_is_load = mem_pipe.instr_sel >= I_LB && mem_pipe.instr_sel <= I_LHU;
 
-    // Incremented registered value that stores the last tag valued used by a data memory request
-    // Tags are used to differentiate between back-to-back memory accesses
-    mem_tag_t mem_tag_val;
-
-    // If HIGH, processor should stall; used for memory accesses
-    logic stall_core;
-
     // Represents the current instruction being decoded in DECODE
     // Used for branch prediction, writing to next pipeline stage
     // (I assume combining a function call used in multiple places will (maybe) make synthesis more efficient)
@@ -104,7 +94,7 @@ module core (
     assign decoded_instr = parse_instruction(fetch_pipe.instr_data);
 
     // True if branch misprediction occurred, PC must be overwritten, pipeline flushed of bad instr
-    logic branch_mispredicted; // TODO: needs 3 states: MISPREDICT, PREDICT, NOT BRANCH
+    logic branch_mispredicted;
     // New PC if branch was mispredicted
     word_t pc_override;
 
@@ -116,7 +106,7 @@ module core (
     // Result from executing instruction in execute stage
     reg_data_t alu_result;
     assign alu_result = execute_instr(decode_pipe.instr_data, decode_pipe.pc, decode_pipe.instr_sel, 
-                                      register_io.read_data_1, register_io.read_data_2);
+                                      rs1_data_from_reg, rs2_data_from_reg);
 
     // Main program counter sequential logic
     // Remember that main pc represents what is fetched in the NEXT clock cycle
@@ -124,9 +114,6 @@ module core (
         if (reset) begin
             pc <= reset_pc;
             pc_was_reset <= TRUE;
-        end else if (stall_core) begin
-            pc <= pc;
-            pc_was_reset <= TRUE; // If core stalls, instr mem will catch up to pc; this ensures instr pc stays accurate
         end else if (update_pc) begin
             pc <= new_pc_val + 4; // new_pc_val is directly fed to mem in this case to avoid delay, so skip to next instr
             pc_was_reset <= FALSE;
@@ -217,20 +204,17 @@ module core (
     // Load and store for a type must be naturally aligned to the respective datatype
     // (i.e. the effective address is not divisible by the size of the access in bytes)
     always_comb begin
-        if (execute_pipe_is_load & execute_pipe.valid) begin
+        if (execute_pipe.valid & execute_pipe_is_load) begin
             data_mem_req.valid = TRUE;
             data_mem_req.addr = execute_pipe.wb_data; // Calculated memory addr in EXECUTE
             data_mem_req.data = REG_ZERO_VAL;
             data_mem_req.do_read = create_byte_plane(execute_pipe.instr_sel, execute_pipe.wb_data);
             data_mem_req.do_write = 4'b0000;
             data_mem_req.user_tag = execute_pipe.user_tag;
-        end else if (execute_pipe_is_store & execute_pipe.valid) begin
-            // Check for data_mem_rsp.valid == 0 is required so request only exists while waiting for memory response
-            // This ensures false requests are not generated that are read by the simulator as dupe writes to stdout
+        end else if (execute_pipe.valid & execute_pipe_is_store) begin
             data_mem_req.valid = TRUE;
             data_mem_req.addr = execute_pipe.wb_data;
-            data_mem_req.data = write_shift_data_by_offset(execute_pipe.instr_sel, execute_pipe.wb_data, 
-                                                           execute_pipe.rs2_data);
+            data_mem_req.data = write_shift_data_by_offset(execute_pipe.instr_sel, execute_pipe.wb_data, execute_pipe.rs2_data);
             data_mem_req.do_read = 4'b0000;
             data_mem_req.do_write = create_byte_plane(execute_pipe.instr_sel, execute_pipe.wb_data);  
             data_mem_req.user_tag = execute_pipe.user_tag;
@@ -242,18 +226,6 @@ module core (
             data_mem_req.do_write = 4'b0000;
             data_mem_req.user_tag = TAG_ZERO;
         end
-    end
-
-    // Processor stall control
-    // Sets stall to HIGH if processor needs to stall for memory access
-    always_comb begin
-       // Stall if processor is waiting for valid mem response or if tag does not match tag of instr in mem stage
-       if ((execute_pipe_is_load || execute_pipe_is_store) && 
-           (!data_mem_rsp.valid || (data_mem_rsp.valid && data_mem_rsp.user_tag != execute_pipe.user_tag))) begin
-           stall_core = TRUE;
-       end else begin
-           stall_core = FALSE;
-       end
     end
 
     // Pipeline sequential logic
@@ -278,20 +250,16 @@ module core (
             fetch_pipe.pc <= REG_ZERO_VAL;
         end else begin
             if (inst_mem_rsp.valid) begin
-                if (stall_core) begin
-                    fetch_pipe <= fetch_pipe;
-                end else begin
-                    // If instr in decode is jump, next mem response after is invalid due to memory latency
-                    if (flush_instr_mem_latched || flush_fetch)
-                        fetch_pipe.valid <= FALSE;
-                    else
-                        fetch_pipe.valid <= TRUE;
-                    fetch_pipe.instr_data <= inst_mem_rsp.data;
-                end
+                // If instr in decode is jump, next mem response after is invalid due to memory latency
+                if (flush_instr_mem_latched || flush_fetch)
+                    fetch_pipe.valid <= FALSE;
+                else
+                    fetch_pipe.valid <= TRUE;
+                fetch_pipe.instr_data <= inst_mem_rsp.data;
             end else begin
                 fetch_pipe.valid <= FALSE;
             end
-            fetch_pipe.pc <= (pc_was_reset) ? pc : pc - 4; 
+            fetch_pipe.pc <= inst_mem_rsp.addr; 
         end
     end
 
@@ -303,14 +271,10 @@ module core (
             decode_pipe.pc <= REG_ZERO_VAL;
             decode_pipe.instr_sel <= X_UNKNOWN;
         end else begin
-            if (stall_core)
-                decode_pipe <= decode_pipe;
-            else begin
-                decode_pipe.valid <= (flush_decode) ? FALSE : fetch_pipe.valid;
-                decode_pipe.instr_data <= fetch_pipe.instr_data;
-                decode_pipe.pc <= fetch_pipe.pc;
-                decode_pipe.instr_sel <= decoded_instr;
-            end
+            decode_pipe.valid <= (flush_decode) ? FALSE : fetch_pipe.valid;
+            decode_pipe.instr_data <= fetch_pipe.instr_data;
+            decode_pipe.pc <= fetch_pipe.pc;
+            decode_pipe.instr_sel <= decoded_instr;
         end
     end
 
@@ -318,7 +282,6 @@ module core (
     // TODO: Review how register file is loading data for execute stage
     always_ff @(posedge clk) begin
         if (reset) begin
-            mem_tag_val <= TAG_ZERO;
             execute_pipe.valid <= FALSE;
             execute_pipe.instr_data <= REG_ZERO_VAL;
             execute_pipe.pc <= REG_ZERO_VAL;
@@ -330,22 +293,19 @@ module core (
             execute_pipe.wb_en <= FALSE;
             execute_pipe.wb_addr <= REG_ZERO;
         end else if (decode_pipe.valid) begin
-            if (stall_core)
-                execute_pipe <= execute_pipe;
-            else begin 
-                mem_tag_val <= (decode_pipe_is_load || decode_pipe_is_store) ? mem_tag_val + 1 : mem_tag_val;
-                execute_pipe.valid <= TRUE;
-                execute_pipe.instr_data <= decode_pipe.instr_data;
-                print_instruction(decode_pipe.pc, decode_pipe.instr_data);
-                execute_pipe.pc <= decode_pipe.pc;
-                execute_pipe.instr_sel <= decode_pipe.instr_sel;
-                execute_pipe.rs1_data <= rs1_data_from_reg;
-                execute_pipe.rs2_data <= rs2_data_from_reg;
-                execute_pipe.user_tag <= mem_tag_val; // Only used if instr happens to be memory access
-                execute_pipe.wb_data <= alu_result;
-                execute_pipe.wb_addr <= decode_pipe.instr_data.r_type.rd; // All instruction types use the same rd location
-                execute_pipe.wb_en <= (decode_pipe.instr_sel < S_SB || decode_pipe.instr_sel > B_BGEU) ? TRUE : FALSE; // If instr has return value
-            end
+            execute_pipe.valid <= TRUE;
+            execute_pipe.instr_data <= decode_pipe.instr_data;
+            print_instruction(decode_pipe.pc, decode_pipe.instr_data);
+            execute_pipe.pc <= decode_pipe.pc;
+            execute_pipe.instr_sel <= decode_pipe.instr_sel;
+            execute_pipe.rs1_data <= rs1_data_from_reg;
+            execute_pipe.rs2_data <= rs2_data_from_reg;
+            execute_pipe.user_tag <= TAG_ZERO; // Not used for this lab
+            execute_pipe.wb_data <= alu_result;
+            $display("%h ALU result %d for instr %d", decode_pipe.pc, $signed(alu_result), decode_pipe.instr_sel);
+            execute_pipe.wb_addr <= decode_pipe.instr_data.r_type.rd; // All instruction types use the same rd bits
+            execute_pipe.wb_en <= ((decode_pipe.instr_sel < S_SB || decode_pipe.instr_sel > B_BGEU) 
+                                 && decode_pipe.instr_sel != X_UNKNOWN) ? TRUE : FALSE; // If instr has return value
         end else begin
             execute_pipe.valid <= FALSE;
         end
@@ -354,7 +314,6 @@ module core (
     // Memory stage sequential logic
     always_ff @(posedge clk) begin
         if (reset) begin
-            mem_tag_val <= TAG_ZERO;
             mem_pipe.valid <= FALSE;
             mem_pipe.instr_data <= REG_ZERO_VAL;
             mem_pipe.pc <= REG_ZERO_VAL;
@@ -364,24 +323,14 @@ module core (
             mem_pipe.wb_en <= FALSE;
             mem_pipe.wb_addr <= REG_ZERO;
         end else if (execute_pipe.valid) begin
-            if (stall_core) begin
-                mem_pipe <= mem_pipe;
-                $display("Stalling, instr tag: %-0d, mem tag: %-0d, mem valid: %-0d", execute_pipe.user_tag, data_mem_rsp.user_tag, data_mem_rsp.valid);
-            end else begin
-                mem_pipe.valid <= TRUE;
-                mem_pipe.instr_data <= execute_pipe.instr_data;
-                mem_pipe.pc <= execute_pipe.pc;
-                mem_pipe.instr_sel <= execute_pipe.instr_sel;
-                mem_pipe.rs1_data <= execute_pipe.rs1_data;
-                mem_pipe.wb_en <= execute_pipe.wb_en;
-                mem_pipe.wb_addr <= execute_pipe.wb_addr;
-                $display("Writing back %d to x%d", execute_pipe.wb_data, execute_pipe.wb_addr);
-                if (execute_pipe_is_load) begin
-                    mem_pipe.wb_data <= interpret_read_memory_rsp(execute_pipe.instr_sel, data_mem_rsp);
-                end else begin
-                    mem_pipe.wb_data <= execute_pipe.wb_data;
-                end
-            end       
+            mem_pipe.valid <= TRUE;
+            mem_pipe.instr_data <= execute_pipe.instr_data;
+            mem_pipe.pc <= execute_pipe.pc;
+            mem_pipe.instr_sel <= execute_pipe.instr_sel;
+            mem_pipe.rs1_data <= execute_pipe.rs1_data;
+            mem_pipe.wb_en <= execute_pipe.wb_en;
+            mem_pipe.wb_addr <= execute_pipe.wb_addr;
+            mem_pipe.wb_data <= execute_pipe.wb_data; 
         end else begin
             mem_pipe.valid <= FALSE;
         end
@@ -392,9 +341,8 @@ module core (
     // Writeback register file I/O logic
 
     assign register_io.write_reg_addr = mem_pipe.wb_addr;
-    assign register_io.write_data = (mem_pipe_is_load) ? interpret_read_memory_rsp(mem_pipe.instr_sel, data_mem_rsp) : mem_pipe.wb_data;
-    assign register_io.write_enable = (mem_pipe.valid && (mem_pipe.wb_en || mem_pipe_is_load)) ? TRUE : FALSE;
-    // TODO: What to do if memory response isn't valid when mem_pipe_is_load is valid? Ans: have to stall somehow
+    assign register_io.write_data = (mem_pipe.valid & mem_pipe_is_load) ? interpret_read_memory_rsp(mem_pipe.instr_sel, data_mem_rsp) : mem_pipe.wb_data;
+    assign register_io.write_enable = (mem_pipe.valid & mem_pipe.wb_en) ? TRUE : FALSE;
 
 endmodule
 
