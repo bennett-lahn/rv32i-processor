@@ -37,9 +37,9 @@ function logic predict_branch_taken(b_type_t b_instr);
     return (b_instr.imm12 == 1'b1);
 endfunction
 
-// Returns HIGH if inputted instr_select_t is a branch instr
-function logic is_branch(instr_select_t instr_sel);
-    return instr_sel >= B_BEQ && instr_sel <= B_BGEU;
+// Returns HIGH if inputted instr opcode is a branch
+function logic is_branch(opcode_t opcode);
+    return (opcode == OPCODE_B_TYPE); // B-Type instructions (BEQ, BNE, BLT, BGE, BLTU, BGEU)
 endfunction
 
 // Returns HIGH if inputted instr_select_t is a jump instr

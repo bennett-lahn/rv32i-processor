@@ -158,4 +158,5 @@ function reg_index_t update_rs2_addr(rv32i_instruction_t reg_instr_data);
         default: return REG_ZERO;
     endcase
 endfunction
+
 `endif

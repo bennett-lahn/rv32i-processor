@@ -207,6 +207,8 @@ typedef enum logic [2:0] {
 } instr_type_t;
 
 // Decoded instructions translated into this type, used to pick right instruction in execute stage
+// Note: DO NOT CHANGE THE ORDER OF THIS ENUM. Add instructions only after checking every comparison usage
+// of this enum
 typedef enum logic [5:0] {
     R_ADD
     ,R_SUB
@@ -266,6 +268,16 @@ typedef enum logic [31:0] {
 // These types are used to manage data in each pipeline stage
 // They should always be registered
 
+// Enum type used to select the appropriate forwarding network for each instruction
+// EXEC/MEM refers to the pipeline register name, not architectural stage, i.e. EXEC reads from
+// exec_pipeline register
+// fwd = forward; src = source
+typedef enum logic [1:0] {
+    FWD_NONE = 2'b00,
+    FWD_EXEC = 2'b01,
+    FWD_MEM  = 2'b10
+} fwd_src_t;
+
 // Pipeline register type for the Fetch stage
 typedef struct packed {
     logic               valid;      // Indicates if the fetched instruction is valid
@@ -279,6 +291,8 @@ typedef struct packed {
     rv32i_instruction_t instr_data; // The complete instruction
     word_t              pc;         // Program counter carried over
     instr_select_t      instr_sel;  // Decoded instruction selection
+    fwd_src_t    fwd_rs1;    // Forwarding source for rs1: NONE, EXEC, or MEM
+    fwd_src_t    fwd_rs2;    // Forwarding source for rs2: NONE, EXEC, or MEM
 } decode_pipe_t;
 
 // Pipeline register type for the Execute stage
@@ -289,11 +303,13 @@ typedef struct packed {
     instr_select_t      instr_sel;  // Decoded instruction selection
     reg_data_t          rs1_data;   // Data read from rs1
     reg_data_t          rs2_data;   // Data read from rs2
-    mem_tag_t           user_tag;     // Used to differentiate memory accesses
+    mem_tag_t           user_tag;   // Used to differentiate memory accesses
     reg_data_t          wb_data;    // Computed result for writeback
     logic               wb_en;      // Writeback enable signal
     reg_index_t         wb_addr;    // Writeback register address (destination)
+    
 } execute_pipe_t;
+
 
 // Pipeline register type for the Memory stage (prior to writeback)
 typedef struct packed {

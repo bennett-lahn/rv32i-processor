@@ -72,10 +72,13 @@ label_case3_target:
     addi   x12, x0, 999       # This instruction should be flushed (should not execute)
 label_case4_target:
     addi   x13, x0, 400       # x13 = 400 (branch target executed on misprediction)
+    addi   x1,  x0, 1
+    addi   x2,  x0, 2
+    nop
+    nop
 
     #############################################
     # End Test (Halt Simulation)
     # Write a halt signal to a memory-mapped location.
-    #############################################
-    addi   a0, x0, 30000      # a0 = 30000 (an address within immediate range)
-    sw     zero, 0(a0)        # Write to exit signal to halt simulation
+    # Not currently supported.
+    ############################################

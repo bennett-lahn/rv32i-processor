@@ -32,6 +32,8 @@ typedef struct packed {
 // read_reg_addr_1 only used for rs1
 // read_reg_addr_2 only used for rs2
 // write_reg_addr selects register to be written to by write_data if write_enable is true
+// This register file implements register file bypass. If a register being read is the same as
+// the register being written, the new data being written is used for the read
 module register_file_m (
     input logic clk
     ,input logic reset
@@ -54,10 +56,8 @@ module register_file_m (
                 reg_file[i] <= REG_ZERO_VAL;
             end
         end else begin
-            if (write_enable && write_reg_addr != REG_ZERO) begin
+            if (write_enable && write_reg_addr != REG_ZERO)
                 reg_file[write_reg_addr] <= write_data; // Write
-                $display("Writing back %d to x%-0d", write_data, write_reg_addr);
-            end
             // Read
             read_data_1 <= (read_reg_addr_1 == REG_ZERO) ? REG_ZERO_VAL : ((write_reg_addr == read_reg_addr_1) && write_enable) ? write_data : reg_file[read_reg_addr_1];
             read_data_2 <= (read_reg_addr_2 == REG_ZERO) ? REG_ZERO_VAL : ((write_reg_addr == read_reg_addr_2) && write_enable) ? write_data : reg_file[read_reg_addr_2];

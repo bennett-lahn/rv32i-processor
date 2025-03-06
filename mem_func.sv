@@ -84,7 +84,7 @@ function reg_data_t interpret_read_memory_rsp(instr_select_t instr_sel, memory_i
     reg_data_t temp;
     // Call shift data to move rsp data into proper LSB(s)
     temp = read_shift_data_by_offset(instr_sel, data_mem_rsp.addr, data_mem_rsp.data);
-    $display("Shifted data: %d Unshifted data: %d, rsp valid: %d", temp, data_mem_rsp.data, data_mem_rsp.valid);
+    // $display("Shifted data: %d Unshifted data: %d, rsp valid: %d", temp, data_mem_rsp.data, data_mem_rsp.valid);
     case (instr_sel)
         I_LB:     return reg_data_t'({{24{temp[7]}}, temp[7:0]});
         I_LH:     return reg_data_t'({{16{temp[15]}}, temp[15:0]});

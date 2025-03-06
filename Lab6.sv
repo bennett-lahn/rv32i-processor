@@ -8,6 +8,7 @@
 `include "mem_func.sv"
 `include "branch_func.sv"
 `include "register_file.sv"
+`include "sys_func.sv"
 
 module core (
     input logic  clk
@@ -67,26 +68,6 @@ assign rs1_data_from_reg = register_io.read_data_1;
 reg_data_t rs2_data_from_reg;
 assign rs2_data_from_reg = register_io.read_data_2;
 
-// Comparison signal for execute stage; true if instruction in execute stage is a load
-logic decode_pipe_is_load;
-assign decode_pipe_is_load = decode_pipe.instr_sel >= I_LB && decode_pipe.instr_sel <= I_LHU;
-
-// Comparison signal for decode stage; true if instruction in decode stage is a store
-logic decode_pipe_is_store;
-assign decode_pipe_is_store = decode_pipe.instr_sel >= S_SB && decode_pipe.instr_sel <= S_SW;
-
-// Comparison signal for mem stage; true if instruction in mem stage is a load
-logic execute_pipe_is_load;
-assign execute_pipe_is_load = execute_pipe.instr_sel >= I_LB && execute_pipe.instr_sel <= I_LHU;
-
-// Comparison signal for mem stage; true if instruction in mem stage is a store
-logic execute_pipe_is_store;
-assign execute_pipe_is_store = execute_pipe.instr_sel >= S_SB && execute_pipe.instr_sel <= S_SW;
-
-// Comparison signal for writeback stage; true if instruction in mem stage is a store
-logic mem_pipe_is_load;
-assign mem_pipe_is_load = mem_pipe.instr_sel >= I_LB && mem_pipe.instr_sel <= I_LHU;
-
 // Represents the current instruction being decoded in DECODE
 // Used for branch prediction, writing to next pipeline stage
 // (I assume combining a function call used in multiple places will (maybe) make synthesis more efficient)
@@ -102,6 +83,28 @@ word_t pc_override;
 // flush_instr_mem indicates that the next instr from memory is invalid
 // flush_instr_mem_latched is used to execuute flush_instr_mem in the fetch stage, since instr can't be flushed before mem returns it
 logic flush_instr_mem, flush_instr_mem_latched, flush_fetch, flush_decode;
+
+// Used by forwarding unit to select which forwarding networks the instr in decode should use in the execute stage
+fwd_src_t rs1_fwd_network;
+fwd_src_t rs2_fwd_network;
+
+// Opcode value of current instr being decoded (in decode stage)
+opcode_t decode_opcode 
+assign decode_opcode = fetch_pipe.instr_data.r_type.opcode;
+
+// rs1 and rs2 index values of current instr being decoded (in decode stage)
+reg_index_t decode_rs1_index;
+reg_index_t decode_rs2_index;
+assign decode_rs1_index = fetch_pipe.instr_data.r_type.rs1;
+assign decode_rs2_index = fetch_pipe.instr_data.r_type.rs2;
+
+// rd index values of current instructions in execute and memory stages
+reg_index_t execute_rd_index;
+reg_index_t mem_rd_index;
+assign execute_rd_index = decode_pipe.instr_data.r_type.rd;
+assign mem_rd_index = execute_pipe.instr_data.r_type.rd
+
+
 
 // Result from executing instruction in execute stage
 reg_data_t alu_result;
@@ -131,7 +134,7 @@ always_comb begin
     if (branch_mispredicted) begin
         update_pc = TRUE;
         new_pc_val = pc_override;
-    end else if (fetch_pipe.valid && is_branch(decoded_instr)) begin
+    end else if (fetch_pipe.valid && is_branch(fetch_pipe.instr_data.r_type.opcode)) begin
         if (predict_branch_taken(fetch_pipe.instr_data.b_type)) begin
             update_pc = TRUE;
             new_pc_val = build_branch_pc(fetch_pipe.instr_data.b_type, fetch_pipe.pc);
@@ -148,7 +151,7 @@ end
 // Branch misprediction (and jump flush) logic, operating in EXECUTE stage
 // If predict_branch_taken output does not match branch evaluation from ALU, flush pipeline and update PC
 always_comb begin
-    if (decode_pipe.valid & is_branch(decode_pipe.instr_sel)) begin
+    if (decode_pipe.valid & is_branch(decode_pipe.instr_data.r_type.opcode)) begin
         // Case 1: Predict branch taken (correct); only flush decode
         if (predict_branch_taken(decode_pipe.instr_data.b_type) && alu_result == REG_TRUE) begin 
             branch_mispredicted = FALSE;
@@ -203,15 +206,16 @@ assign inst_mem_req.do_write = 4'b0000;
 // Pipelined memory request logic
 // Load and store for a type must be naturally aligned to the respective datatype
 // (i.e. the effective address is not divisible by the size of the access in bytes)
+// Functions used to interact with memory detailed in mem_func.sv
 always_comb begin
-    if (execute_pipe.valid & execute_pipe_is_load) begin
+    if (execute_pipe.valid & is_load(execute_pipe.instr_sel)) begin
         data_mem_req.valid = TRUE;
         data_mem_req.addr = execute_pipe.wb_data; // Calculated memory addr in EXECUTE
         data_mem_req.data = REG_ZERO_VAL;
         data_mem_req.do_read = create_byte_plane(execute_pipe.instr_sel, execute_pipe.wb_data);
         data_mem_req.do_write = 4'b0000;
         data_mem_req.user_tag = execute_pipe.user_tag;
-    end else if (execute_pipe.valid & execute_pipe_is_store) begin
+    end else if (execute_pipe.valid & is_store(execute_pipe.instr_sel)) begin
         data_mem_req.valid = TRUE;
         data_mem_req.addr = execute_pipe.wb_data;
         data_mem_req.data = write_shift_data_by_offset(execute_pipe.instr_sel, execute_pipe.wb_data, execute_pipe.rs2_data);
@@ -225,6 +229,25 @@ always_comb begin
         data_mem_req.do_read = 4'b0000;
         data_mem_req.do_write = 4'b0000;
         data_mem_req.user_tag = TAG_ZERO;
+    end
+end
+
+// Register Forwarding Unit
+// Compares instr in decode to instrs downstream, looking for data hazards
+// Updates pipeline data to activate the necessary forwarding channels in execute
+// Move down pipe, checking if instr update dependent registers, priority for recently executed instr
+always_comb begin
+    // rs1, opcode in same place for all instr types
+    if (uses_rs1(fetch_opcode) & ~(is_load(fetch_opcode) | is_store(fetch_opcode))) begin
+        
+    end else begin
+        rs1_fwd_network = FWD_NONE;
+    end
+    // rs2, opcode in same place for all instr types
+    if (uses_rs1(fetch_opcode) & ~(is_load(fetch_opcode) | is_store(fetch_opcode))) begin
+        
+    end else begin
+        rs2_fwd_network = FWD_NONE;
     end
 end
 
@@ -270,6 +293,8 @@ always_ff @(posedge clk) begin
         decode_pipe.instr_data <= REG_ZERO_VAL;
         decode_pipe.pc <= REG_ZERO_VAL;
         decode_pipe.instr_sel <= X_UNKNOWN;
+        decode_pipe.fwd_rs1 <= FWD_NONE;
+        decode_pipe.fwd_rs2 <= FWD_NONE;
     end else begin
         decode_pipe.valid <= (flush_decode) ? FALSE : fetch_pipe.valid;
         decode_pipe.instr_data <= fetch_pipe.instr_data;
@@ -341,7 +366,7 @@ end
 // Writeback register file I/O logic
 
 assign register_io.write_reg_addr = mem_pipe.wb_addr;
-assign register_io.write_data = (mem_pipe.valid & mem_pipe_is_load) ? interpret_read_memory_rsp(mem_pipe.instr_sel, data_mem_rsp) : mem_pipe.wb_data;
+assign register_io.write_data = (mem_pipe.valid & is_load(mem_pipe.instr_sel)) ? interpret_read_memory_rsp(mem_pipe.instr_sel, data_mem_rsp) : mem_pipe.wb_data;
 assign register_io.write_enable = (mem_pipe.valid & mem_pipe.wb_en) ? TRUE : FALSE;
 
 endmodule
