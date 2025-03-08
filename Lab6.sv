@@ -61,12 +61,16 @@ assign register_io.read_reg_addr_1 = update_rs1_addr(fetch_pipe.instr_data);
 assign register_io.read_reg_addr_2 = update_rs2_addr(fetch_pipe.instr_data);
 
 // rs1 data from register file
-reg_data_t rs1_data_from_reg;
-assign rs1_data_from_reg = register_io.read_data_1;
+// Should not be used directly outside rs1_data_for_alu assign
+// Use rs1_data_for_alu, which includes forwarding
+reg_data_t rs1_data_from_regfile;
+assign rs1_data_from_regfile = register_io.read_data_1;
 
 // rs2 data from register file
-reg_data_t rs2_data_from_reg;
-assign rs2_data_from_reg = register_io.read_data_2;
+// Should not be used directly outside rs2_data_for_alu assign
+// Use rs2_data_for_alu, which includes forwarding
+reg_data_t rs2_data_from_regfile;
+assign rs2_data_from_regfile = register_io.read_data_2;
 
 // Represents the current instruction being decoded in DECODE
 // Used for branch prediction, writing to next pipeline stage
@@ -89,7 +93,7 @@ fwd_src_t rs1_fwd_network;
 fwd_src_t rs2_fwd_network;
 
 // Opcode value of current instr being decoded (in decode stage)
-opcode_t decode_opcode 
+opcode_t decode_opcode;
 assign decode_opcode = fetch_pipe.instr_data.r_type.opcode;
 
 // rs1 and rs2 index values of current instr being decoded (in decode stage)
@@ -102,14 +106,19 @@ assign decode_rs2_index = fetch_pipe.instr_data.r_type.rs2;
 reg_index_t execute_rd_index;
 reg_index_t mem_rd_index;
 assign execute_rd_index = decode_pipe.instr_data.r_type.rd;
-assign mem_rd_index = execute_pipe.instr_data.r_type.rd
-
-
+assign mem_rd_index = execute_pipe.instr_data.r_type.rd;
 
 // Result from executing instruction in execute stage
 reg_data_t alu_result;
+// rs1 and rs2 values used by alu, either forwarded from later pipeline stages or from reg file
+reg_data_t rs1_data_for_alu;
+reg_data_t rs2_data_for_alu;
+assign rs1_data_for_alu = (decode_pipe.fwd_rs1 == FWD_EXEC) ? execute_pipe.wb_data : 
+                          (decode_pipe.fwd_rs1 == FWD_MEM) ? mem_pipe.wb_data : rs1_data_from_regfile;
+assign rs2_data_for_alu = (decode_pipe.fwd_rs2 == FWD_EXEC) ? execute_pipe.wb_data : 
+                          (decode_pipe.fwd_rs2 == FWD_MEM) ? mem_pipe.wb_data : rs2_data_from_regfile;
 assign alu_result = execute_instr(decode_pipe.instr_data, decode_pipe.pc, decode_pipe.instr_sel, 
-                                  rs1_data_from_reg, rs2_data_from_reg);
+                                  rs1_data_for_alu, rs2_data_for_alu);
 
 // Main program counter sequential logic
 // Remember that main pc represents what is fetched in the NEXT clock cycle
@@ -184,7 +193,7 @@ always_comb begin
     end else if (decode_pipe.valid & is_jump(decode_pipe.instr_sel)) begin 
         branch_mispredicted = TRUE; // Misnomer because not a branch, but equivalent to Case 3 in effect
         pc_override = (decode_pipe.instr_sel == J_JAL) ? build_jal_pc(decode_pipe.instr_data.j_type, decode_pipe.pc) : 
-                                                         build_jalr_pc(decode_pipe.instr_data.i_type, decode_pipe.pc, rs1_data_from_reg);
+                                                         build_jalr_pc(decode_pipe.instr_data.i_type, decode_pipe.pc, rs1_data_for_alu);
         flush_decode = TRUE;
         flush_fetch = TRUE;
         flush_instr_mem = FALSE;
@@ -236,16 +245,31 @@ end
 // Compares instr in decode to instrs downstream, looking for data hazards
 // Updates pipeline data to activate the necessary forwarding channels in execute
 // Move down pipe, checking if instr update dependent registers, priority for recently executed instr
+// Forwarding ignored for zero register
 always_comb begin
     // rs1, opcode in same place for all instr types
-    if (uses_rs1(fetch_opcode) & ~(is_load(fetch_opcode) | is_store(fetch_opcode))) begin
-        
+    if (uses_rs1(decode_opcode) & ~(is_load(decode_opcode) | is_store(decode_opcode))) begin
+        if (decode_rs1_index == REG_ZERO) // Ignore forwarding for zero register
+            rs1_fwd_network = FWD_NONE;
+        else if ((decode_rs1_index == execute_rd_index) & decode_pipe.valid)
+            rs1_fwd_network = FWD_EXEC;
+        else if ((decode_rs1_index == mem_rd_index) & execute_pipe.valid)
+            rs1_fwd_network = FWD_MEM;
+        else
+            rs1_fwd_network = FWD_NONE;
     end else begin
         rs1_fwd_network = FWD_NONE;
     end
     // rs2, opcode in same place for all instr types
-    if (uses_rs1(fetch_opcode) & ~(is_load(fetch_opcode) | is_store(fetch_opcode))) begin
-        
+    if (uses_rs2(decode_opcode) & ~(is_load(decode_opcode) | is_store(decode_opcode))) begin
+        if (decode_rs2_index == REG_ZERO) // Ignore forwarding for zero register
+            rs2_fwd_network = FWD_NONE;
+        else if ((decode_rs2_index == execute_rd_index) & decode_pipe.valid)
+            rs2_fwd_network = FWD_EXEC;
+        else if ((decode_rs2_index == mem_rd_index) & decode_pipe.valid)
+            rs2_fwd_network = FWD_MEM;
+        else
+            rs2_fwd_network = FWD_NONE;
     end else begin
         rs2_fwd_network = FWD_NONE;
     end
@@ -300,6 +324,8 @@ always_ff @(posedge clk) begin
         decode_pipe.instr_data <= fetch_pipe.instr_data;
         decode_pipe.pc <= fetch_pipe.pc;
         decode_pipe.instr_sel <= decoded_instr;
+        decode_pipe.fwd_rs1 <= rs1_fwd_network;
+        decode_pipe.fwd_rs2 <= rs2_fwd_network;
     end
 end
 
@@ -323,8 +349,8 @@ always_ff @(posedge clk) begin
         print_instruction(decode_pipe.pc, decode_pipe.instr_data);
         execute_pipe.pc <= decode_pipe.pc;
         execute_pipe.instr_sel <= decode_pipe.instr_sel;
-        execute_pipe.rs1_data <= rs1_data_from_reg;
-        execute_pipe.rs2_data <= rs2_data_from_reg;
+        execute_pipe.rs1_data <= rs1_data_for_alu;
+        execute_pipe.rs2_data <= rs2_data_for_alu;
         execute_pipe.user_tag <= TAG_ZERO; // Not used for this lab
         execute_pipe.wb_data <= alu_result;
         $display("%h ALU result %d for instr %d", decode_pipe.pc, $signed(alu_result), decode_pipe.instr_sel);
