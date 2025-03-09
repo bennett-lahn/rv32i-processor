@@ -30,6 +30,8 @@ logic pc_was_reset;
 logic update_pc;
 // Value pc should be updated to when update_pc is HIGH
 word_t new_pc_val;
+// Value for pc of the previous instr, used when stalling
+word_t prev_pc_val;
 
 // Pipeline registers
 fetch_pipe_t fetch_pipe;
@@ -90,6 +92,9 @@ logic flush_fetch, flush_decode;
 fwd_src_t rs1_fwd_network;
 fwd_src_t rs2_fwd_network;
 
+// True if bubble/nop should be inserted in front of instr in decode, stalling processor
+logic insert_bubble_execute;
+
 // Opcode value of current instr being decoded (in decode stage)
 opcode_t decode_opcode;
 assign decode_opcode = fetch_pipe.instr_data.r_type.opcode;
@@ -114,24 +119,37 @@ reg_data_t alu_result;
 // However, would still have to MUX data_from_regfile because it's not ready until execute
 reg_data_t rs1_data_for_alu;
 reg_data_t rs2_data_for_alu;
-assign rs1_data_for_alu = (decode_pipe.fwd_rs1 == FWD_EXEC) ? execute_pipe.wb_data : 
-                          (decode_pipe.fwd_rs1 == FWD_MEM) ? mem_pipe.wb_data : rs1_data_from_regfile;
-assign rs2_data_for_alu = (decode_pipe.fwd_rs2 == FWD_EXEC) ? execute_pipe.wb_data : 
-                          (decode_pipe.fwd_rs2 == FWD_MEM) ? mem_pipe.wb_data : rs2_data_from_regfile;
+assign rs1_data_for_alu = (decode_pipe.fwd_rs1 == FWD_EXEC)     ? execute_pipe.wb_data  :
+                          (decode_pipe.fwd_rs1 == FWD_MEM)      ? mem_pipe.wb_data      :
+                          (decode_pipe.fwd_rs1 == FWD_MEM_READ) ? register_io.write_data : 
+                                                                  rs1_data_from_regfile;
+
+assign rs2_data_for_alu = (decode_pipe.fwd_rs2 == FWD_EXEC)     ? execute_pipe.wb_data  :
+                          (decode_pipe.fwd_rs2 == FWD_MEM)      ? mem_pipe.wb_data      :
+                          (decode_pipe.fwd_rs2 == FWD_MEM_READ) ? register_io.write_data : 
+                                                                  rs2_data_from_regfile;
+
 assign alu_result = execute_instr(decode_pipe.instr_data, decode_pipe.pc, decode_pipe.instr_sel, 
                                   rs1_data_for_alu, rs2_data_for_alu);
 
 // Main program counter sequential logic
 // Remember that main pc represents what is fetched in the NEXT clock cycle
+// TODO: Is this logic correctly ordered for stalls/branch mispredicts?
 always_ff @(posedge clk) begin
     if (reset) begin
         pc <= reset_pc;
         pc_was_reset <= TRUE;
+        prev_pc_val <= REG_ZERO_VAL;
+    end else if (insert_bubble_execute) begin
+        pc <= pc;
+        prev_pc_val <= pc; // Only correct for 1-cycle bubble, otherwise need new mechanism to hold prev_pc_val longer
     end else if (update_pc) begin
         pc <= new_pc_val + 4; // new_pc_val is directly fed to mem in this case to avoid delay, so skip to next instr
+        prev_pc_val <= new_pc_val;
         pc_was_reset <= FALSE;
     end else begin
         pc <= pc + 4;
+        prev_pc_val <= pc;
         pc_was_reset <= FALSE;
     end
 end
@@ -140,8 +158,12 @@ end
 // Update master program counter if jump/branch instruction triggers
 // Branch prediction: "backwards taken, fowards not taken"
 // Prefers updating pc to correct mispredict to predicting more branches as fetched instruction would be invalid
+// TODO: Does this logic need to be modified to compensate for stalls occurring?
 always_comb begin
-    if (branch_mispredicted) begin
+    if (insert_bubble_execute) begin
+        update_pc = FALSE;
+        new_pc_val = REG_ZERO_VAL;
+    end else if (branch_mispredicted) begin
         update_pc = TRUE;
         new_pc_val = pc_override;
     end else if (fetch_pipe.valid && is_branch(fetch_pipe.instr_data.r_type.opcode)) begin
@@ -160,6 +182,8 @@ end
 
 // Branch misprediction (and jump flush) logic, operating in EXECUTE stage
 // If predict_branch_taken output does not match branch evaluation from ALU, flush pipeline and update PC
+// TODO: Update branch prediction so jumps don't require flushing (low priority)
+// TODO: Verify jump correctness
 always_comb begin
     if (decode_pipe.valid & is_branch(decode_pipe.instr_data.r_type.opcode)) begin
         // Case 1: Predict branch taken (correct); only flush decode
@@ -203,7 +227,7 @@ end
 
 // Instruction memory request logic for fetch stage
 assign inst_mem_req.valid = (reset) ? FALSE : TRUE;
-assign inst_mem_req.addr = (update_pc) ? new_pc_val : pc;
+assign inst_mem_req.addr = (insert_bubble_execute) ? prev_pc_val : (update_pc) ? new_pc_val : pc;
 assign inst_mem_req.do_read  = 4'b1111;
 assign inst_mem_req.do_write = 4'b0000;
 
@@ -236,34 +260,58 @@ always_comb begin
     end
 end
 
-// Register Forwarding Unit
+// Forwarding Unit
 // Compares instr in decode to instrs downstream, looking for data hazards
 // Updates pipeline data to activate the necessary forwarding channels in execute
 // Move down pipe, checking if instr update dependent registers, priority for recently executed instr
-// Forwarding ignored for zero register, instrs that do not use rd pass in x0 for rd_index, so are not forwarded
+// Forwarding ignored for zero register, instrs that do not use rd pass in x0 for rd_index, are not forwarded
+
+// 
 always_comb begin
+    insert_bubble_execute = FALSE; // Default to no stall
     // rs1, opcode in same place for all instr types
     if (uses_rs1(decode_opcode)) begin
         if (decode_rs1_index == REG_ZERO) // Ignore forwarding for zero register
             rs1_fwd_network = FWD_NONE;
-        else if ((decode_rs1_index == execute_rd_index) & decode_pipe.valid)
-            rs1_fwd_network = FWD_EXEC;
-        else if ((decode_rs1_index == mem_rd_index) & execute_pipe.valid)
-            rs1_fwd_network = FWD_MEM;
-        else
+        else if ((decode_rs1_index == execute_rd_index) & decode_pipe.valid) begin
+            // If the immediate next instr is a load, use FWD_MEM instead due to stalling
+            // Set other signals to stall appropriately (assumes 1 cycle memory response)
+            if (is_load(decode_pipe.instr_data.r_type.opcode)) begin
+                rs1_fwd_network = FWD_MEM; // This value doesn't matter since processor 
+                                           // stalls and load moves ahead a cycle while decode instr doesn't
+                insert_bubble_execute = TRUE;
+            end else
+                rs1_fwd_network = FWD_EXEC;
+        end else if ((decode_rs1_index == mem_rd_index) & execute_pipe.valid) begin
+            if (is_load(execute_pipe.instr_data.r_type.opcode))
+                rs1_fwd_network = FWD_MEM_READ;
+            else
+                rs1_fwd_network = FWD_MEM;
+        end else
             rs1_fwd_network = FWD_NONE;
     end else begin
         rs1_fwd_network = FWD_NONE;
     end
-    // rs2, opcode in same place for all instr types
+    
+    // rs2, should be identical to rs1 but for rs2
     if (uses_rs2(decode_opcode)) begin
         if (decode_rs2_index == REG_ZERO) // Ignore forwarding for zero register
             rs2_fwd_network = FWD_NONE;
-        else if ((decode_rs2_index == execute_rd_index) & decode_pipe.valid)
-            rs2_fwd_network = FWD_EXEC;
-        else if ((decode_rs2_index == mem_rd_index) & decode_pipe.valid)
-            rs2_fwd_network = FWD_MEM;
-        else
+        else if ((decode_rs2_index == execute_rd_index) & decode_pipe.valid) begin
+            // If the immediate next instr is a load, use FWD_MEM instead due to stalling
+            // Set other signals to stall appropriately (assumes 1 cycle memory response)
+            if (is_load(decode_pipe.instr_data.r_type.opcode)) begin
+                rs2_fwd_network = FWD_MEM;
+                insert_bubble_execute = TRUE;
+            end else begin
+                rs2_fwd_network = FWD_EXEC;
+            end
+        end else if ((decode_rs2_index == mem_rd_index) & execute_pipe.valid) begin
+            if (is_load(execute_pipe.instr_data.r_type.opcode))
+                rs2_fwd_network = FWD_MEM_READ;
+            else
+                rs2_fwd_network = FWD_MEM;
+        end else
             rs2_fwd_network = FWD_NONE;
     end else begin
         rs2_fwd_network = FWD_NONE;
@@ -274,12 +322,13 @@ end
 // Each pipeline stage has a synchronized reset, pipeline registers between stages
 
 // Fetch stage sequential logic
+// Do not modify pipeline register if inserting bubble
 always_ff @(posedge clk) begin
     if (reset) begin
         fetch_pipe.valid <= FALSE;
         fetch_pipe.instr_data <= REG_ZERO_VAL;
         fetch_pipe.pc <= REG_ZERO_VAL;
-    end else begin
+    end else if (~insert_bubble_execute) begin
         if (inst_mem_rsp.valid) begin
             // If instr in decode is jump, next mem response after is invalid due to memory latency
             if (flush_fetch)
@@ -303,6 +352,8 @@ always_ff @(posedge clk) begin
         decode_pipe.instr_sel <= X_UNKNOWN;
         decode_pipe.fwd_rs1 <= FWD_NONE;
         decode_pipe.fwd_rs2 <= FWD_NONE;
+    end else if (insert_bubble_execute) begin
+        decode_pipe.valid <= FALSE;
     end else begin
         decode_pipe.valid <= (flush_decode) ? FALSE : fetch_pipe.valid;
         decode_pipe.instr_data <= fetch_pipe.instr_data;
@@ -314,7 +365,6 @@ always_ff @(posedge clk) begin
 end
 
 // Execute stage sequential logic
-// TODO: Review how register file is loading data for execute stage
 always_ff @(posedge clk) begin
     if (reset) begin
         execute_pipe.valid <= FALSE;
@@ -323,21 +373,22 @@ always_ff @(posedge clk) begin
         execute_pipe.instr_sel <= X_UNKNOWN;
         execute_pipe.rs1_data <= REG_ZERO_VAL;
         execute_pipe.rs2_data <= REG_ZERO_VAL;
-        execute_pipe.user_tag <= TAG_ZERO;
+        execute_pipe.user_tag <= TAG_ZERO; // Not used for this lab
         execute_pipe.wb_data <= REG_ZERO_VAL;
         execute_pipe.wb_en <= FALSE;
         execute_pipe.wb_addr <= REG_ZERO;
     end else if (decode_pipe.valid) begin
         execute_pipe.valid <= TRUE;
         execute_pipe.instr_data <= decode_pipe.instr_data;
-        print_instruction(decode_pipe.pc, decode_pipe.instr_data);
+        // print_instruction(decode_pipe.pc, decode_pipe.instr_data);
         execute_pipe.pc <= decode_pipe.pc;
         execute_pipe.instr_sel <= decode_pipe.instr_sel;
-        execute_pipe.rs1_data <= rs1_data_for_alu;
+        execute_pipe.rs1_data <= rs1_data_for_alu; // Includes data that may be forwarded instead of coming from reg file
         execute_pipe.rs2_data <= rs2_data_for_alu;
-        execute_pipe.user_tag <= TAG_ZERO; // Not used for this lab
         execute_pipe.wb_data <= alu_result;
-        $display("%h ALU result %d for instr %d", decode_pipe.pc, $signed(alu_result), decode_pipe.instr_sel);
+        // $display("%h ALU result %d for instr %d", decode_pipe.pc, $signed(alu_result), decode_pipe.instr_sel);
+        // $display("ALU rs1 value %-0d, ALU rs2 value %-0d", rs1_data_for_alu, rs2_data_for_alu);
+        // $display("rs1 fwd %-0d, rs2 fwd %-0d", decode_pipe.fwd_rs1, decode_pipe.fwd_rs2);
         execute_pipe.wb_addr <= decode_pipe.instr_data.r_type.rd; // All instruction types use the same rd bits
         execute_pipe.wb_en <= ((decode_pipe.instr_sel < S_SB || decode_pipe.instr_sel > B_BGEU) 
                              && decode_pipe.instr_sel != X_UNKNOWN) ? TRUE : FALSE; // If instr has return value
@@ -376,7 +427,7 @@ end
 // Writeback register file I/O logic
 
 assign register_io.write_reg_addr = mem_pipe.wb_addr;
-assign register_io.write_data = (mem_pipe.valid & is_load(mem_pipe.instr_data.r_type.opcode)) ? interpret_read_memory_rsp(mem_pipe.instr_sel, data_mem_rsp) : mem_pipe.wb_data;
+assign register_io.write_data = (is_load(mem_pipe.instr_data.r_type.opcode)) ? interpret_read_memory_rsp(mem_pipe.instr_sel, data_mem_rsp) : mem_pipe.wb_data;
 assign register_io.write_enable = (mem_pipe.valid & mem_pipe.wb_en) ? TRUE : FALSE;
 
 endmodule

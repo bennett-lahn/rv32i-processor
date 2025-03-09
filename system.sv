@@ -271,11 +271,13 @@ typedef enum logic [31:0] {
 // Enum type used to select the appropriate forwarding network for each instruction
 // EXEC/MEM refers to the pipeline register name, not architectural stage, i.e. EXEC reads from
 // exec_pipeline register
+// FWD_MEM_READ is a shortcut that we can take since memory reads are always successful and always take 1 cycle
 // fwd = forward; src = source
 typedef enum logic [1:0] {
-    FWD_NONE = 2'b00,
-    FWD_EXEC = 2'b01,
-    FWD_MEM  = 2'b10
+    FWD_NONE = 2'b00
+    ,FWD_EXEC = 2'b01
+    ,FWD_MEM  = 2'b10
+    ,FWD_MEM_READ = 2'b11
 } fwd_src_t;
 
 // Pipeline register type for the Fetch stage

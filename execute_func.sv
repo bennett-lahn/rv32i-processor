@@ -64,11 +64,11 @@ function reg_data_t execute_unknown();
 endfunction
 
 function reg_data_t execute_add(reg_data_t rs1, reg_data_t rs2);
-    return rs1 + rs2;
+    return $signed(rs1) + $signed(rs2);
 endfunction
 
 function reg_data_t execute_sub(reg_data_t rs1, reg_data_t rs2);
-    return rs1 - rs2;
+    return $signed(rs1) - $signed(rs2);
 endfunction
 
 function reg_data_t execute_and(reg_data_t rs1, reg_data_t rs2);
@@ -84,39 +84,39 @@ function reg_data_t execute_xor(reg_data_t rs1, reg_data_t rs2);
 endfunction
 
 function reg_data_t execute_sll(reg_data_t rs1, reg_data_t rs2);
-    return rs1 << rs2;
+    return rs1 << rs2; // Logical shift left
 endfunction
 
 function reg_data_t execute_srl(reg_data_t rs1, reg_data_t rs2);
-    return rs1 >> rs2;
+    return rs1 >> rs2; // Logical shift right
 endfunction
 
 function reg_data_t execute_sra(reg_data_t rs1, reg_data_t rs2);
-    return $signed(rs1) >>> $signed(rs2);
+    return $signed(rs1) >>> rs2; // Arithmetic shift right (shift amount is unsigned)
 endfunction
 
 function reg_data_t execute_slt(reg_data_t rs1, reg_data_t rs2);
-    return $signed(rs1) < $signed(rs2) ? REG_ONE_VAL : REG_ZERO_VAL;
+    return ($signed(rs1) < $signed(rs2)) ? REG_ONE_VAL : REG_ZERO_VAL;
 endfunction
 
 function reg_data_t execute_sltu(reg_data_t rs1, reg_data_t rs2);
-    return rs1 < rs2 ? REG_ONE_VAL : REG_ZERO_VAL;
+    return (rs1 < rs2) ? REG_ONE_VAL : REG_ZERO_VAL;
 endfunction
 
 function reg_data_t execute_addi(i_type_t instr, reg_data_t rs1);
-    return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm}); // Sign-extended immediate value
+    return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm}); // Sign-extended immediate addition
 endfunction
 
 function reg_data_t execute_andi(i_type_t instr, reg_data_t rs1);
-    return rs1 & {{20{instr.imm[11]}}, instr.imm}; // Sign-extended immediate value
+    return rs1 & {{20{instr.imm[11]}}, instr.imm}; // Bitwise, no need for $signed
 endfunction
 
 function reg_data_t execute_ori(i_type_t instr, reg_data_t rs1);
-    return rs1 | {{20{instr.imm[11]}}, instr.imm}; // Sign-extended immediate value
+    return rs1 | {{20{instr.imm[11]}}, instr.imm}; // Bitwise
 endfunction
 
 function reg_data_t execute_xori(i_type_t instr, reg_data_t rs1);
-    return rs1 ^ {{20{instr.imm[11]}}, instr.imm}; // Sign-extended immediate value
+    return rs1 ^ {{20{instr.imm[11]}}, instr.imm}; // Bitwise
 endfunction
 
 function reg_data_t execute_slti(i_type_t instr, reg_data_t rs1);
@@ -128,51 +128,53 @@ function reg_data_t execute_sltiu(i_type_t instr, reg_data_t rs1);
 endfunction
 
 function reg_data_t execute_slli(i_type_t instr, reg_data_t rs1);
-    return rs1 << instr.imm[4:0]; // [4:0] = shamt
+    return rs1 << instr.imm[4:0]; // Logical shift left by immediate
 endfunction
 
 function reg_data_t execute_srli(i_type_t instr, reg_data_t rs1);
-    return rs1 >> instr.imm[4:0]; // [4:0] = shamt
+    return rs1 >> instr.imm[4:0]; // Logical shift right
 endfunction
 
 function reg_data_t execute_srai(i_type_t instr, reg_data_t rs1);
-    return $signed(rs1) >>> instr.imm[4:0]; // [4:0] shamt
+    return $signed(rs1) >>> instr.imm[4:0]; // Arithmetic shift right
 endfunction
 
+// For effective address calculation, we want to sign-extend the immediate.
 function reg_data_t execute_lb(i_type_t instr, reg_data_t rs1);
-    return rs1 + {{20{instr.imm[11]}}, instr.imm};
+    return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm});
 endfunction
 
 function reg_data_t execute_lh(i_type_t instr, reg_data_t rs1);
-    return rs1 + {{20{instr.imm[11]}}, instr.imm};
+    return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm});
 endfunction
 
 function reg_data_t execute_lw(i_type_t instr, reg_data_t rs1);
-    return rs1 + {{20{instr.imm[11]}}, instr.imm};
+    return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm});
 endfunction
 
 function reg_data_t execute_lbu(i_type_t instr, reg_data_t rs1);
-    return rs1 + {{20{instr.imm[11]}}, instr.imm}; 
+    return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm});
 endfunction
 
 function reg_data_t execute_lhu(i_type_t instr, reg_data_t rs1);
-    return rs1 + {{20{instr.imm[11]}}, instr.imm};
+    return $signed(rs1) + $signed({{20{instr.imm[11]}}, instr.imm});
 endfunction
 
 function reg_data_t execute_jalr(word_t pc);
     return pc + 4;
 endfunction
 
+// For S-type effective address calculations, similarly sign-extend the immediate
 function reg_data_t execute_sb(s_type_t instr, reg_data_t rs1);
-    return rs1 + {{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo};
+    return $signed(rs1) + $signed({{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo});
 endfunction
 
 function reg_data_t execute_sh(s_type_t instr, reg_data_t rs1);
-    return rs1 + {{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo};
+    return $signed(rs1) + $signed({{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo});
 endfunction
 
 function reg_data_t execute_sw(s_type_t instr, reg_data_t rs1);
-    return rs1 + {{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo};
+    return $signed(rs1) + $signed({{20{instr.imm_hi[6]}}, instr.imm_hi, instr.imm_lo});
 endfunction
 
 // Functions for branch instructions evaluate branch expression and if true return 1, else return 0
