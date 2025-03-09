@@ -380,13 +380,13 @@ always_ff @(posedge clk) begin
     end else if (decode_pipe.valid) begin
         execute_pipe.valid <= TRUE;
         execute_pipe.instr_data <= decode_pipe.instr_data;
-        // print_instruction(decode_pipe.pc, decode_pipe.instr_data);
+        print_instruction(decode_pipe.pc, decode_pipe.instr_data);
         execute_pipe.pc <= decode_pipe.pc;
         execute_pipe.instr_sel <= decode_pipe.instr_sel;
         execute_pipe.rs1_data <= rs1_data_for_alu; // Includes data that may be forwarded instead of coming from reg file
         execute_pipe.rs2_data <= rs2_data_for_alu;
         execute_pipe.wb_data <= alu_result;
-        // $display("%h ALU result %d for instr %d", decode_pipe.pc, $signed(alu_result), decode_pipe.instr_sel);
+        $display("%h ALU result %d for instr %d", decode_pipe.pc, $signed(alu_result), decode_pipe.instr_sel);
         // $display("ALU rs1 value %-0d, ALU rs2 value %-0d", rs1_data_for_alu, rs2_data_for_alu);
         // $display("rs1 fwd %-0d, rs2 fwd %-0d", decode_pipe.fwd_rs1, decode_pipe.fwd_rs2);
         execute_pipe.wb_addr <= decode_pipe.instr_data.r_type.rd; // All instruction types use the same rd bits
