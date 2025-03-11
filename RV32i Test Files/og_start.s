@@ -8,10 +8,10 @@ _start:
 # Uncomment / add to / etc to test lab 2
 
 
-                        auipc   a4,0x1000
-                        addi    a4,a4,-436
-                        add a5,a5,a4
-                        add a5,a5,a4
+#                        auipc   a4,0x1000
+#                        addi    a4,a4,-436
+#                        add a5,a5,a4
+#                        add a5,a5,a4
 #
 # place additional test instructions here
 #
