@@ -6,7 +6,7 @@ This repository contains the source code and test benches for a pipelined, in-or
 The goal of this project is to build a functional RV32I processor that can execute arbitrary C code. My design is implemented in SystemVerilog and includes modules for the core datapath, control logic, branch prediction, and hazard detection/forwarding. My processor is simulated using both Verilator and Icarus Verilog to verify correct behavior and performance.
 
 ## Repository Structure
-
+```
 .
 ├── core/                  # Processor core implementation (SystemVerilog)
 │   ├── top.sv             # Top-level module
@@ -28,7 +28,7 @@ The goal of this project is to build a functional RV32I processor that can execu
 │   └── (source files)     # Source for functions such as printf, strtok, etc.
 ├── ld.script              # Linker script used for building the test programs
 └── Makefile               # Top-level makefile for building the project and running simulations
-
+```
 ## Testing Methodology
 
 - **Simulation Environments:**
