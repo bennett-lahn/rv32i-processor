@@ -3,18 +3,27 @@
 `include "system.sv"
 `include "register_file.sv"
 
-// Returns TRUE if the given instr_sel indicates a store instruction.
+// Determines if an instruction is a load operation based on opcode
+// Parameters:
+//   opcode: 7-bit instruction opcode field
+// Returns: Boolean indicating whether instruction is a load operation
 function logic is_load(opcode_t opcode);
     return (opcode == OPCODE_LOAD); // Load instructions (LB, LH, LW, LBU, LHU)
 endfunction
 
-// Returns TRUE if the given instr_sel indicates a load instruction.
+// Determines if an instruction is a store operation based on opcode
+// Parameters:
+//   opcode: 7-bit instruction opcode field
+// Returns: Boolean indicating whether instruction is a store operation
 function logic is_store(opcode_t opcode);
     return (opcode == OPCODE_S_TYPE); // Store instructions (SB, SH, SW)
 endfunction
 
 
-// Returns TRUE if instruction corresponding to opcode uses rs1
+// Determines if an instruction uses the rs1 source register
+// Parameters:
+//   opcode: 7-bit instruction opcode field
+// Returns: Boolean indicating whether instruction reads from rs1
 function logic uses_rs1(opcode_t opcode);
     case (opcode)
         OPCODE_R_TYPE,  // R-type (ADD, SUB, AND, OR, XOR, etc.)
@@ -29,7 +38,10 @@ function logic uses_rs1(opcode_t opcode);
     endcase
 endfunction
 
-// Returns TRUE if instruction corresponding to opcode uses rs2
+// Determines if an instruction uses the rs2 source register
+// Parameters:
+//   opcode: 7-bit instruction opcode field
+// Returns: Boolean indicating whether instruction reads from rs2
 function logic uses_rs2(opcode_t opcode);
     case (opcode)
         OPCODE_R_TYPE,  // R-type ALU (ADD, SUB, AND, OR, XOR, etc.)
@@ -41,7 +53,10 @@ function logic uses_rs2(opcode_t opcode);
     endcase
 endfunction
 
-// Returns TRUE if instruction corresponding to opcode uses rd
+// Determines if an instruction writes to the rd destination register
+// Parameters:
+//   opcode: 7-bit instruction opcode field
+// Returns: Boolean indicating whether instruction writes to rd
 function logic uses_rd(opcode_t opcode);
     case (opcode)
         OPCODE_R_TYPE,   // R-Type instructions (ADD, SUB, AND, OR, etc.)

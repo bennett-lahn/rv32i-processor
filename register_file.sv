@@ -1,20 +1,8 @@
 `ifndef _regfile
 `define _regfile
+`include "system.sv"
 
-// This file contains the register file module and related register types
-
-// 32-bit type representing data to/from registers
-// Also used as a generic 32-bit data type
-typedef logic [31:0] reg_data_t;
-typedef logic [4:0] reg_index_t; // 5-bit register index (rd, rs1, rs2)
-
-// Values for x0 register; data and address
-// REG_ZERO_VAL also used by some instructions to zero output
-localparam reg_data_t REG_ZERO_VAL = 32'd0;
-localparam reg_index_t REG_ZERO = 5'd0;
-
-// Used by certain instructions to set register output to one
-localparam reg_data_t REG_ONE_VAL = 32'd1;
+// This file contains the register file module
 
 // Struct for easier manipulation of register file I/O
 typedef struct packed {

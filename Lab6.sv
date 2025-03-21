@@ -132,45 +132,18 @@ assign rs2_data_for_alu = (decode_pipe.fwd_rs2 == FWD_EXEC)     ? execute_pipe.w
 assign alu_result = execute_instr(decode_pipe.instr_data, decode_pipe.pc, decode_pipe.instr_sel, 
                                   rs1_data_for_alu, rs2_data_for_alu);
 
-// Main program counter sequential logic
-// Remember that main pc represents what is fetched in the NEXT clock cycle
-always_ff @(posedge clk) begin
-    if (reset) begin
-        pc <= reset_pc;
-        pc_was_reset <= TRUE;
-        prev_pc_val <= REG_ZERO_VAL;
-    end else if (insert_bubble_execute) begin
-        pc <= pc;
-        prev_pc_val <= pc; // Only correct for 1-cycle bubble, otherwise need new mechanism to hold prev_pc_val longer
-    end else if (update_pc) begin
-        pc <= new_pc_val + 4; // new_pc_val is directly fed to mem in this case to avoid delay, so skip to next instr
-        prev_pc_val <= new_pc_val;
-        pc_was_reset <= FALSE;
-    end else begin
-        pc <= pc + 4;
-        prev_pc_val <= pc;
-        pc_was_reset <= FALSE;
-    end
-end
+// ------------------------------------------------------------------------------------------------
+// Combinational Logic
+// ------------------------------------------------------------------------------------------------
 
-// Combined combinational logic
+// Forwarding Unit
+// Compares instr in decode to instrs downstream, looking for data hazards
+// Updates pipeline data to activate the necessary forwarding channels in execute
+// Move down pipe, checking if instr update dependent registers, priority for recently executed instr
+// Forwarding ignored for zero register, instrs that do not use rd pass in x0 for rd_index, are not forwarded
 always_comb begin
-    // Default inputs for combinational logic; defaults also set in every if/else case
-    update_pc = FALSE;
-    new_pc_val = REG_ZERO_VAL;
-    branch_mispredicted = FALSE;
-    pc_override = REG_ZERO_VAL;
-    flush_decode = FALSE;
-    flush_fetch = FALSE;
-    insert_bubble_execute = FALSE; // Default to no stall
     rs1_fwd_network = FWD_NONE;
     rs2_fwd_network = FWD_NONE;
-
-    // Forwarding Unit
-    // Compares instr in decode to instrs downstream, looking for data hazards
-    // Updates pipeline data to activate the necessary forwarding channels in execute
-    // Move down pipe, checking if instr update dependent registers, priority for recently executed instr
-    // Forwarding ignored for zero register, instrs that do not use rd pass in x0 for rd_index, are not forwarded
     if (uses_rs1(decode_opcode)) begin
         if (decode_rs1_index == REG_ZERO) // Ignore forwarding for zero register
             rs1_fwd_network = FWD_NONE;
@@ -217,6 +190,20 @@ always_comb begin
     end else begin
         rs2_fwd_network = FWD_NONE;
     end
+end
+
+// Branch prediction and program counter logic
+// Minor TODO: Currently branch prediction requires calculating the target address twice: in fetch when updating the PC,
+// (if decode is branch) and in execute (if the branch is mispredicted). It would be better to avoid this using BTB etc.
+always_comb begin
+    // Default inputs for combinational logic; defaults also set in every if/else case
+    update_pc = FALSE;
+    new_pc_val = REG_ZERO_VAL;
+    branch_mispredicted = FALSE;
+    pc_override = REG_ZERO_VAL;
+    flush_decode = FALSE;
+    flush_fetch = FALSE;
+    insert_bubble_execute = FALSE; // Default to no stall
 
     // Branch misprediction (and jump flush) logic, operating in EXECUTE stage
     // If predict_branch_taken output does not match branch evaluation from ALU, flush pipeline and update PC
@@ -330,8 +317,34 @@ always_comb begin
     end
 end
 
+// ------------------------------------------------------------------------------------------------
+// Sequential Logic
+// ------------------------------------------------------------------------------------------------
+
+// Main program counter sequential logic
+// Remember that main pc represents what is fetched in the NEXT clock cycle
+always_ff @(posedge clk) begin
+    if (reset) begin
+        pc <= reset_pc;
+        pc_was_reset <= TRUE;
+        prev_pc_val <= REG_ZERO_VAL;
+    end else if (insert_bubble_execute) begin
+        pc <= pc;
+        prev_pc_val <= pc; // Only correct for 1-cycle bubble, otherwise need new mechanism to hold prev_pc_val longer
+    end else if (update_pc) begin
+        pc <= new_pc_val + 4; // new_pc_val is directly fed to mem in this case to avoid delay, so skip to next instr
+        prev_pc_val <= new_pc_val;
+        pc_was_reset <= FALSE;
+    end else begin
+        pc <= pc + 4;
+        prev_pc_val <= pc;
+        pc_was_reset <= FALSE;
+    end
+end
+
 // Pipeline sequential logic
-// Each pipeline stage has a synchronized reset, pipeline registers between stages
+// Each pipeline stage has a synchronized reset, pipeline registers between stages 
+// (fetch, decode, execute, memory, writeback)
 
 // Fetch/decode stage sequential logic
 // Do not modify pipeline register if inserting bubble

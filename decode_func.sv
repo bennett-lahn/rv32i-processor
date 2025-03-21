@@ -1,9 +1,11 @@
 `ifndef _decode_func_
 `define _decode_func_
 `include "system.sv"
-`include "register_file.sv" // Used for reg_index_t type
 
-// Translates raw instruction into specific instruction type using opcode
+// Translates raw instruction into specific instruction type (enum value)
+// Parameters:
+//   instr: Complete RV32I instruction data structure
+// Returns: Enumerated instruction type for execution stage
 function instr_select_t parse_instruction(rv32i_instruction_t instr);
     instr_type_t instr_type;
     instr_type = decode_opcode(instr.raw[6:0]); // Opcode
@@ -18,7 +20,10 @@ function instr_select_t parse_instruction(rv32i_instruction_t instr);
     endcase
 endfunction
 
-// Function returning instr_type_t corrresponding to instruction type of opcode
+// Categorizes instruction based on opcode into major instruction type
+// Parameters:
+//   opcode: 7-bit opcode field from instruction
+// Returns: Instruction type enum (R/I/S/B/U/J)
 function instr_type_t decode_opcode(opcode_t opcode);
     case (opcode)
         OPCODE_R_TYPE: return INSTR_R_TYPE; // R-type
@@ -34,7 +39,10 @@ function instr_type_t decode_opcode(opcode_t opcode);
     endcase
 endfunction
 
-// Decodes and returns appropriate R-type instruction given r_type_t input
+// Decodes R-type instruction using funct3 and funct7 fields
+// Parameters:
+//   instr: R-type instruction structure
+// Returns: Specific R-type instruction enum (ADD, SUB, AND, etc.)
 function instr_select_t decode_r_type(r_type_t instr);
     case (instr.funct3)
         FUNCT3_ADD_SUB: begin
@@ -55,9 +63,10 @@ function instr_select_t decode_r_type(r_type_t instr);
     endcase
 endfunction
 
-// Decodes appropriate I-type instruction given i_type_t input
-// FUNCT3 names are not to be taken literally in this case statement since 
-// multiple i-type instructions share funct3
+// Decodes I-type instructions based on opcode, funct3, and immediate fields
+// Parameters:
+//   instr: I-type instruction structure
+// Returns: Specific I-type instruction enum (ADDI, JALR, LB, etc.)
 function instr_select_t decode_i_type(i_type_t instr);
     case (instr.funct3)
         FUNCT3_ADDI: begin     
@@ -90,7 +99,10 @@ function instr_select_t decode_i_type(i_type_t instr);
     endcase
 endfunction
 
-// Decodes s-type instructon given s_type_t instr input
+// Decodes S-type (store) instructions using funct3 field
+// Parameters:
+//   instr: S-type instruction structure
+// Returns: Specific store instruction enum (SB, SH, SW)
 function instr_select_t decode_s_type(s_type_t instr);
     case (instr.funct3)
         FUNCT3_SB: return S_SB;
@@ -100,7 +112,10 @@ function instr_select_t decode_s_type(s_type_t instr);
     endcase
 endfunction
 
-// Decodes u-type instruction given u_type_t instr input
+// Decodes U-type instructions based on opcode
+// Parameters:
+//   instr: U-type instruction structure
+// Returns: Either LUI or AUIPC enum value
 function instr_select_t decode_u_type(u_type_t instr);
     case (instr.opcode)
         OPCODE_LUI:     return U_LUI;
@@ -109,7 +124,10 @@ function instr_select_t decode_u_type(u_type_t instr);
     endcase
 endfunction
 
-// Decodes b-type instruction given b_type_t input
+// Decodes B-type (branch) instructions using funct3 field
+// Parameters:
+//   instr: B-type instruction structure
+// Returns: Specific branch instruction enum (BEQ, BNE, etc.)
 function instr_select_t decode_b_type(b_type_t instr);
     case (instr.funct3)
         FUNCT3_BEQ:   return B_BEQ;
@@ -122,12 +140,18 @@ function instr_select_t decode_b_type(b_type_t instr);
     endcase
 endfunction
 
-// Decodes j-type instruction given j_type_t input
+// Decodes J-type (jump) instructions - only JAL in RV32I
+// Parameters:
+//   instr: J-type instruction structure
+// Returns: J_JAL enum value
 function instr_select_t decode_j_type(j_type_t instr);
     return J_JAL;
 endfunction
 
-// Given instruction, returns appropriate rs1 register number
+// Extracts rs1 register index from instruction based on type
+// Parameters:
+//   reg_instr_data: Complete instruction data structure
+// Returns: Register index for rs1 field, or REG_ZERO if not used
 function reg_index_t update_rs1_addr(rv32i_instruction_t reg_instr_data);
     // Decides which parts of instruction to use to load registers
     instr_type_t reg_load_type;
@@ -143,7 +167,10 @@ function reg_index_t update_rs1_addr(rv32i_instruction_t reg_instr_data);
     endcase
 endfunction
 
-// Given instruction, returns appropriate rs2 register number
+// Extracts rs2 register index from instruction based on type
+// Parameters:
+//   reg_instr_data: Complete instruction data structure
+// Returns: Register index for rs2 field, or REG_ZERO if not used
 function reg_index_t update_rs2_addr(rv32i_instruction_t reg_instr_data);
     // Decides which parts of instruction to use to load registers
     instr_type_t reg_load_type;

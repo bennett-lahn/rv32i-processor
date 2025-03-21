@@ -4,27 +4,39 @@
 `ifndef _system_
 `define _system_
 
-// Used for reg_data_t type
-`include "register_file.sv"
-
 `define word_size 32
 `define word_address_size 32
 
 `define word_size_bytes (`word_size/8)
 `define word_address_size_bytes (`word_address_size/8)
 
-// WARNING: DO NOT CHANGE WITHOUT CHANGING MEM_TAG_T AND TAG_ZERO SIZE BELOW
 `define user_tag_size 16
-typedef logic [15:0] mem_tag_t; // Used in mem stage to differentiate memory accesses
-localparam TAG_ZERO = 16'b0;
+typedef logic [`user_tag_size - 1:0] mem_tag_t; // Used in mem stage to differentiate memory accesses
+localparam TAG_ZERO = `user_tag_size'b0;
 
 // Useful macros to make the code more readable
 localparam TRUE = 1'b1;
 localparam FALSE = 1'b0;
 localparam BYTE = 8;
-localparam REG_TRUE = 32'd1;  // TRUE, but for reg_data_t types
-localparam REG_FALSE = 32'd0; // FALSE, but for reg_data_t types
+localparam REG_TRUE = `word_size'd1;  // TRUE, but for reg_data_t types
+localparam REG_FALSE = `word_size'd0; // FALSE, but for reg_data_t types
 
+// ------------------------------------------------------------------------------------------------
+// These types and localparams are used by the register file and for interacting with register data
+
+// 32-bit type representing data to/from data registers
+typedef logic [`word_size - 1:0] reg_data_t;
+typedef logic [4:0] reg_index_t; // 5-bit register index (rd, rs1, rs2)
+
+// Values for x0 register; data and address
+// REG_ZERO_VAL also used by some instructions to zero output
+localparam reg_data_t REG_ZERO_VAL = `word_size'd0;
+localparam reg_index_t REG_ZERO = 5'd0;
+
+// Used by certain instructions to set register output to one
+localparam reg_data_t REG_ONE_VAL = `word_size'd1;
+
+// ------------------------------------------------------------------------------------------------
 // These localparams/structs are basic types used by the processor to define/decode instructions
 // Specific types for registers are found in register_file.sv
 
@@ -256,6 +268,7 @@ typedef enum logic [5:0] {
     ,X_UNKNOWN
 } instr_select_t;
 
+// ------------------------------------------------------------------------------------------------
 // Used to distinguish between possible memory offsets when aligning halfword/byte read/writes 
 typedef enum logic [31:0] {
     ZERO
@@ -264,6 +277,7 @@ typedef enum logic [31:0] {
     ,THREE
 } mem_offset_t;
 
+// ------------------------------------------------------------------------------------------------
 // Pipeline types/structs
 // These types are used to manage data in each pipeline stage
 // They should always be registered
@@ -311,7 +325,6 @@ typedef struct packed {
     reg_index_t         wb_addr;    // Writeback register address (destination)
     
 } execute_pipe_t;
-
 
 // Pipeline register type for the Memory stage (prior to writeback)
 typedef struct packed {
