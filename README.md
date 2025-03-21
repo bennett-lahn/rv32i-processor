@@ -9,23 +9,23 @@ The goal of this project is to build a functional RV32I processor that can execu
 ```
 .
 ├── core/                  # Processor core implementation (SystemVerilog)
-│   ├── top.sv             # Top-level module
+│   ├── top.sv             # Top-level module for simulation
 │   ├── execute_func.sv    # Execute stage functions
 │   ├── decode_func.sv     # Decode stage functions
 │   ├── mem_func.sv        # Memory interface functions
 │   ├── branch_func.sv     # Branch prediction and control logic
 │   ├── register_file.sv   # Register file implementation
-│   └── sys_func.sv        # System-level helper functions
+│   └── sys_func.sv        # Misc. helper functions
 ├── tests/                 # Assembly and C test programs
-│   ├── test_asm.s         # Assembly test cases
-│   └── test_c.c           # C test program to run on the processor
-├── sim/                   # Simulation top files and scripts
+│   ├── test_asm           # Assembly test cases
+│   └── test_c             # C test program to run on the processor
+├── sim/                   # Simulation files and scripts
 │   ├── verilator_top.cpp  # Verilator simulation top-level
 │   └── run_iverilog.sh    # Script to run Icarus Verilog simulation
 ├── libmc/                 # Custom C library for simulator I/O and utility functions
 │   ├── libmc.a            # Precompiled library archive
 │   ├── libmc.h            # Header file for the custom C functions
-│   └── (source files)     # Source for functions such as printf, strtok, etc.
+│   └── (source files)     # C source for functions such as printf, strtok, etc.
 ├── ld.script              # Linker script used for building the test programs
 └── Makefile               # Top-level makefile for building the project and running simulations
 ```
