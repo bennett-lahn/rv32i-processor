@@ -8,7 +8,7 @@
 // Returns: Enumerated instruction type for execution stage
 function instr_select_t parse_instruction(instruction_t instr);
     instr_type_t instr_type;
-    instr_type = decode_opcode(instr.raw[6:0]); // Opcode
+    instr_type = decode_opcode(instr[6:0]); // Opcode
     case (instr_type)
         INSTR_R_TYPE: return decode_r_type(r_type_t'(instr));
         INSTR_I_TYPE: return decode_i_type(i_type_t'(instr));
@@ -154,13 +154,15 @@ endfunction
 // Returns: Register index for rs1 field, or REG_ZERO if not used
 function reg_index_t update_rs1_addr(instruction_t reg_instr_data);
     // Decides which parts of instruction to use to load registers
+    r_type_t casted_instr;
     instr_type_t reg_load_type;
-    reg_load_type = decode_opcode(reg_instr_data.r_type.opcode); // Opcode same for all instr types
+    casted_instr = r_type_t'(reg_instr_data);
+    reg_load_type = decode_opcode(casted_instr.opcode); // Opcode same for all instr types
     case (reg_load_type)
-        INSTR_R_TYPE: return r_type_t'(reg_instr_data.r_type.rs1);
-        INSTR_I_TYPE: return i_type_t'(reg_instr_data.i_type.rs1);
-        INSTR_S_TYPE: return s_type_t'(reg_instr_data.s_type.rs1);
-        INSTR_B_TYPE: return b_type_t'(reg_instr_data.b_type.rs1);
+        INSTR_R_TYPE: return r_type_t'(casted_instr.rs1);
+        INSTR_I_TYPE: return i_type_t'(casted_instr.rs1);
+        INSTR_S_TYPE: return s_type_t'(casted_instr.rs1);
+        INSTR_B_TYPE: return b_type_t'(casted_instr.rs1);
         INSTR_U_TYPE: return REG_ZERO;
         INSTR_J_TYPE: return REG_ZERO;
         default: return REG_ZERO;
@@ -173,13 +175,19 @@ endfunction
 // Returns: Register index for rs2 field, or REG_ZERO if not used
 function reg_index_t update_rs2_addr(instruction_t reg_instr_data);
     // Decides which parts of instruction to use to load registers
+    r_type_t r_casted_instr;
+    s_type_t s_casted_instr;
+    b_type_t b_casted_instr;
     instr_type_t reg_load_type;
-    reg_load_type = decode_opcode(reg_instr_data.r_type.opcode); // Opcode same for all instr types
+    r_casted_instr = r_type_t'(reg_instr_data);
+    s_casted_instr = s_type_t'(reg_instr_data);
+    b_casted_instr = b_type_t'(reg_instr_data);
+    reg_load_type = decode_opcode(r_casted_instr.opcode); // Opcode same for all instr types
     case (reg_load_type)
-        INSTR_R_TYPE: return r_type_t'(reg_instr_data.r_type.rs2);
+        INSTR_R_TYPE: return r_type_t'(r_casted_instr.rs2);
         INSTR_I_TYPE: return REG_ZERO;
-        INSTR_S_TYPE: return s_type_t'(reg_instr_data.s_type.rs2);
-        INSTR_B_TYPE: return b_type_t'(reg_instr_data.b_type.rs2);
+        INSTR_S_TYPE: return s_type_t'(s_casted_instr.rs2);
+        INSTR_B_TYPE: return b_type_t'(b_casted_instr.rs2);
         INSTR_U_TYPE: return REG_ZERO;
         INSTR_J_TYPE: return REG_ZERO;
         default: return REG_ZERO;

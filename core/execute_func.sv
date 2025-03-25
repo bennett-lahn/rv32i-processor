@@ -1,6 +1,5 @@
 `ifndef _execute_func_
 `define _execute_func_
-`include "base.sv"
 `include "system.sv"
 `include "register_file.sv" // Used for reg_index_t type
 
