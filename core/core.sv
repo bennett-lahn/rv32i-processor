@@ -97,20 +97,20 @@ logic insert_bubble_execute;
 
 // Opcode value of current instr being decoded (in decode stage)
 opcode_t decode_opcode;
-assign decode_opcode = fetch_pipe.instr_data.r_type.opcode;
+assign decode_opcode = r_type_t'(fetch_pipe.instr_data).opcode;
 
 // rs1 and rs2 index values of current instr being decoded (in decode stage)
 reg_index_t decode_rs1_index;
 reg_index_t decode_rs2_index;
-assign decode_rs1_index = fetch_pipe.instr_data.r_type.rs1;
-assign decode_rs2_index = fetch_pipe.instr_data.r_type.rs2;
+assign decode_rs1_index = r_type_t'(fetch_pipe.instr_data).rs1;
+assign decode_rs2_index = r_type_t'(fetch_pipe.instr_data).rs2;
 
 // rd index values of current instructions in execute and memory stages
 // If instruction does not use rd, passes x0 value (never forwarded by fwd unit)
 reg_index_t execute_rd_index;
 reg_index_t mem_rd_index;
-assign execute_rd_index = (uses_rd(decode_pipe.instr_data.r_type.opcode)) ? decode_pipe.instr_data.r_type.rd : REG_ZERO;
-assign mem_rd_index =     (uses_rd(execute_pipe.instr_data.r_type.opcode)) ? execute_pipe.instr_data.r_type.rd : REG_ZERO;
+assign execute_rd_index = (uses_rd(r_type_t'(decode_pipe.instr_data).opcode)) ? r_type_t'(decode_pipe.instr_data).rd : REG_ZERO;
+assign mem_rd_index =     (uses_rd(r_type_t'(execute_pipe.instr_data).opcode)) ? r_type_t'(execute_pipe.instr_data).rd : REG_ZERO;
 
 // Result from executing instruction in execute stage
 reg_data_t alu_result;
@@ -150,14 +150,14 @@ always_comb begin
         else if ((decode_rs1_index == execute_rd_index) & decode_pipe.valid) begin
             // If the immediate next instr is a load, use FWD_MEM instead due to stalling
             // Set other signals to stall appropriately (assumes 1 cycle memory response)
-            if (is_load(decode_pipe.instr_data.r_type.opcode)) begin
+            if (is_load(r_type_t'(decode_pipe.instr_data).opcode)) begin
                 rs1_fwd_network = FWD_MEM; // This value doesn't matter since processor 
                                            // stalls and load moves ahead a cycle while decode instr doesn't
                 insert_bubble_execute = TRUE;
             end else
                 rs1_fwd_network = FWD_EXEC;
         end else if ((decode_rs1_index == mem_rd_index) & execute_pipe.valid) begin
-            if (is_load(execute_pipe.instr_data.r_type.opcode))
+            if (is_load(r_type_t'(execute_pipe.instr_data).opcode))
                 rs1_fwd_network = FWD_MEM_READ;
             else
                 rs1_fwd_network = FWD_MEM;
@@ -174,14 +174,14 @@ always_comb begin
         else if ((decode_rs2_index == execute_rd_index) & decode_pipe.valid) begin
             // If the immediate next instr is a load, use FWD_MEM instead due to stalling
             // Set other signals to stall appropriately (assumes 1 cycle memory response)
-            if (is_load(decode_pipe.instr_data.r_type.opcode)) begin
+            if (is_load(r_type_t'(decode_pipe.instr_data).opcode)) begin
                 rs2_fwd_network = FWD_MEM;
                 insert_bubble_execute = TRUE;
             end else begin
                 rs2_fwd_network = FWD_EXEC;
             end
         end else if ((decode_rs2_index == mem_rd_index) & execute_pipe.valid) begin
-            if (is_load(execute_pipe.instr_data.r_type.opcode))
+            if (is_load(r_type_t'(execute_pipe.instr_data).opcode))
                 rs2_fwd_network = FWD_MEM_READ;
             else
                 rs2_fwd_network = FWD_MEM;
@@ -208,23 +208,23 @@ always_comb begin
     // Branch misprediction (and jump flush) logic, operating in EXECUTE stage
     // If predict_branch_taken output does not match branch evaluation from ALU, flush pipeline and update PC
     // TODO: Update branch prediction so jumps don't require flushing (low priority)
-    if (decode_pipe.valid & is_branch(decode_pipe.instr_data.r_type.opcode)) begin
+    if (decode_pipe.valid & is_branch(r_type_t'(decode_pipe.instr_data).opcode)) begin
         // Case 1: Predict branch taken (correct); only flush decode
-        if (predict_branch_taken(decode_pipe.instr_data.b_type) && alu_result == REG_TRUE) begin 
+        if (predict_branch_taken(b_type_t'(decode_pipe.instr_data) && alu_result == REG_TRUE) begin 
             branch_mispredicted = FALSE;
             pc_override = REG_ZERO_VAL;
             flush_decode = TRUE;
             flush_fetch = FALSE;
         // Case 2: Predict branch taken (incorrect); flush fetch, but not decode which contains pc + 4
-        end else if (predict_branch_taken(decode_pipe.instr_data.b_type) && alu_result != REG_TRUE) begin
+        end else if (predict_branch_taken(b_type_t'(decode_pipe.instr_data) && alu_result != REG_TRUE) begin
             branch_mispredicted = TRUE;
             pc_override = decode_pipe.pc + 8;
             flush_decode = FALSE;
             flush_fetch = TRUE;
         // Case 3: Predict branch not taken (incorrect); flush decode, fetch
-        end else if (!predict_branch_taken(decode_pipe.instr_data.b_type) && alu_result == REG_TRUE) begin
+        end else if (!predict_branch_taken(b_type_t'(decode_pipe.instr_data)) && alu_result == REG_TRUE) begin
             branch_mispredicted = TRUE;
-            pc_override = build_branch_pc(decode_pipe.instr_data.b_type, decode_pipe.pc);
+            pc_override = build_branch_pc(b_type_t'(decode_pipe.instr_data), decode_pipe.pc);
             flush_decode = TRUE;
             flush_fetch = TRUE;
         // Case 4: Predict branch not taken (correct); do not flush anything, as PC is not modified by predictor or branch    
@@ -236,8 +236,8 @@ always_comb begin
         end
     end else if (decode_pipe.valid & is_jump(decode_pipe.instr_sel)) begin 
         branch_mispredicted = TRUE; // Misnomer because not a branch, but equivalent to Case 3 in effect
-        pc_override = (decode_pipe.instr_sel == J_JAL) ? build_jal_pc(decode_pipe.instr_data.j_type, decode_pipe.pc) : 
-                                                         build_jalr_pc(decode_pipe.instr_data.i_type, decode_pipe.pc, rs1_data_for_alu);
+        pc_override = (decode_pipe.instr_sel == J_JAL) ? build_jal_pc(j_type_t'(decode_pipe.instr_data), decode_pipe.pc) : 
+                                                         build_jalr_pc(i_type_t'(decode_pipe.instr_data), decode_pipe.pc, rs1_data_for_alu);
         flush_decode = TRUE;
         flush_fetch = TRUE;
     end else begin
@@ -257,10 +257,10 @@ always_comb begin
     end else if (branch_mispredicted) begin
         update_pc = TRUE;
         new_pc_val = pc_override;
-    end else if (fetch_pipe.valid && is_branch(fetch_pipe.instr_data.r_type.opcode)) begin
-        if (predict_branch_taken(fetch_pipe.instr_data.b_type)) begin
+    end else if (fetch_pipe.valid && is_branch(r_type_t'(fetch_pipe.instr_data).opcode)) begin
+        if (predict_branch_taken(b_type_t'(fetch_pipe.instr_data))) begin
             update_pc = TRUE;
-            new_pc_val = build_branch_pc(fetch_pipe.instr_data.b_type, fetch_pipe.pc);
+            new_pc_val = build_branch_pc(b_type_t'(fetch_pipe.instr_data), fetch_pipe.pc);
         end else begin
             update_pc = FALSE;
             new_pc_val = REG_ZERO_VAL;
@@ -293,14 +293,14 @@ always_comb begin
     data_mem_req.do_write = 4'b0000;
     data_mem_req.user_tag = TAG_ZERO;
     data_mem_req.dummy = 3'b0;
-    if (execute_pipe.valid & is_load(execute_pipe.instr_data.r_type.opcode)) begin
+    if (execute_pipe.valid & is_load(r_type_t'(execute_pipe.instr_data).opcode)) begin
         data_mem_req.valid = TRUE;
         data_mem_req.addr = execute_pipe.wb_data; // Calculated memory addr in EXECUTE
         data_mem_req.data = REG_ZERO_VAL;
         data_mem_req.do_read = create_byte_plane(execute_pipe.instr_sel, execute_pipe.wb_data);
         data_mem_req.do_write = 4'b0000;
         data_mem_req.user_tag = execute_pipe.user_tag;
-    end else if (execute_pipe.valid & is_store(execute_pipe.instr_data.r_type.opcode)) begin
+    end else if (execute_pipe.valid & is_store(r_type_t'(execute_pipe.instr_data).opcode)) begin
         data_mem_req.valid = TRUE;
         data_mem_req.addr = execute_pipe.wb_data;
         data_mem_req.data = write_shift_data_by_offset(execute_pipe.instr_sel, execute_pipe.wb_data, execute_pipe.rs2_data);
@@ -457,7 +457,7 @@ end
 // Writeback register file I/O logic
 
 assign register_io.write_reg_addr = mem_pipe.wb_addr;
-assign register_io.write_data = (is_load(mem_pipe.instr_data.r_type.opcode)) ? interpret_read_memory_rsp(mem_pipe.instr_sel, data_mem_rsp) : mem_pipe.wb_data;
+assign register_io.write_data = (is_load(r_type_t'(mem_pipe.instr_data).opcode)) ? interpret_read_memory_rsp(mem_pipe.instr_sel, data_mem_rsp) : mem_pipe.wb_data;
 assign register_io.write_enable = (mem_pipe.valid & mem_pipe.wb_en) ? TRUE : FALSE;
 
 endmodule
