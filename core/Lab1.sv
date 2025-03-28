@@ -1,7 +1,6 @@
 `ifndef _debug
 `define _debug
 `include "system.sv"
-`include "base.sv"
 
 // Function returning instr_type_t corrresponding to instruction type of opcode
 function instr_type_t debug_decode_opcode(opcode_t opcode);
@@ -118,23 +117,23 @@ function string debug_decode_j_type(j_type_t instr);
 endfunction
 
 // Returns string representation of inputted function
-function string debug_parse_instruction(rv32i_instruction_t instr);
+function string debug_parse_instruction(instruction_t instr);
     instr_type_t instr_type;
     instr_type = debug_decode_opcode(instr.raw[6:0]); // Opcode
     case (instr_type)
-        INSTR_R_TYPE: return debug_decode_r_type(instr.r_type);
-        INSTR_I_TYPE: return debug_decode_i_type(instr.i_type);
-        INSTR_S_TYPE: return debug_decode_s_type(instr.s_type);
-        INSTR_B_TYPE: return debug_decode_b_type(instr.b_type);
-        INSTR_U_TYPE: return debug_decode_u_type(instr.u_type);
-        INSTR_J_TYPE: return debug_decode_j_type(instr.j_type);
+        INSTR_R_TYPE: return debug_decode_r_type(r_type_t'(instr));
+        INSTR_I_TYPE: return debug_decode_i_type(i_type_t'(instr));
+        INSTR_S_TYPE: return debug_decode_s_type(s_type_t'(instr));
+        INSTR_B_TYPE: return debug_decode_b_type(b_type_t'(instr));
+        INSTR_U_TYPE: return debug_decode_u_type(u_type_t'(instr));
+        INSTR_J_TYPE: return debug_decode_j_type(j_type_t'(instr));
         default: return "Unsupported instruction";
     endcase
 endfunction
 
 function void print_instruction(logic [31:0] pc, logic [31:0] instruction);
-	rv32i_instruction_t instr_new_type;
-	instr_new_type.raw = instruction;
+	instruction_t instr_new_type;
+	instr_new_type = instruction;
     $write("%x: ", pc);
     $write("%x   ", instruction);
     $write("%s", debug_parse_instruction(instr_new_type));

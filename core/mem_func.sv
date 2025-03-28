@@ -1,6 +1,5 @@
 `ifndef _mem_func_
 `define _mem_func_
-`include "base.sv"
 `include "system.sv"
 
 // This file contains functions used for store/load instructions

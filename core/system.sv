@@ -196,17 +196,6 @@ typedef struct packed {
     opcode_t opcode;       // Bits [6:0]
 } j_type_t;
 
-// Generic RV32i Instruction Encoding	
-typedef union packed {
-    r_type_t r_type;  // R-type instruction
-    i_type_t i_type;  // I-type instruction
-    s_type_t s_type;  // S-type instruction
-    b_type_t b_type;  // B-type instruction
-    u_type_t u_type;  // U-type instruction
-    j_type_t j_type;  // J-type instruction
-    instruction_t raw; // Raw 32-bit instruction, used to modify entire instruction
-} rv32i_instruction_t;
-
 // ENUM type used by debug_decode_opcode and debug_parse_instruction to pick appropriate instr type
 typedef enum logic [2:0] {
     INSTR_R_TYPE = 3'd0
@@ -297,14 +286,14 @@ typedef enum logic [1:0] {
 // Pipeline register type for the Fetch stage
 typedef struct packed {
     logic               valid;      // Indicates if the fetched instruction is valid
-    rv32i_instruction_t instr_data; // The complete instruction
+    instruction_t instr_data; // The complete instruction
     word_t              pc;         // Program counter carried over
 } fetch_pipe_t;
 
 // Pipeline register type for the Decode stage
 typedef struct packed {
     logic               valid;      // Indicates if the decode stage holds a valid instruction
-    rv32i_instruction_t instr_data; // The complete instruction
+    instruction_t instr_data; // The complete instruction
     word_t              pc;         // Program counter carried over
     instr_select_t      instr_sel;  // Decoded instruction selection
     fwd_src_t    fwd_rs1;    // Forwarding source for rs1: NONE, EXEC, or MEM
@@ -314,7 +303,7 @@ typedef struct packed {
 // Pipeline register type for the Execute stage
 typedef struct packed {
     logic               valid;      // Valid bit for the stage
-    rv32i_instruction_t instr_data; // The complete instruction
+    instruction_t       instr_data; // The complete instruction
     word_t              pc;         // Program counter carried over
     instr_select_t      instr_sel;  // Decoded instruction selection
     reg_data_t          rs1_data;   // Data read from rs1
@@ -329,7 +318,7 @@ typedef struct packed {
 // Pipeline register type for the Memory stage (prior to writeback)
 typedef struct packed {
     logic               valid;      // Valid bit for the stage
-    rv32i_instruction_t instr_data; // The complete instruction
+    instruction_t       instr_data; // The complete instruction
     word_t              pc;         // Program counter
     instr_select_t      instr_sel;  // Decoded instruction selection
     reg_data_t          rs1_data;   // rs1 data (e.g., for JALR target calculation)

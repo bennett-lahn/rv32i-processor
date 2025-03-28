@@ -1,6 +1,6 @@
-`include "base.sv"
 `include "memory.sv"
-`include "lab4.sv"
+`include "core.sv"
+`include "system.sv"
 
 module top(input clk, input reset, output logic halt);
 
@@ -14,8 +14,8 @@ core the_core(
     .clk(clk)
     ,.reset(reset)
     ,.reset_pc(32'h0001_0000)
-    ,.instr_mem_req(inst_mem_req)
-    ,.instr_mem_rsp(inst_mem_rsp)
+    ,.inst_mem_req(inst_mem_req)
+    ,.inst_mem_rsp(inst_mem_rsp)
 
     ,.data_mem_req(data_mem_req)
     ,.data_mem_rsp(data_mem_rsp)
@@ -24,12 +24,12 @@ core the_core(
 
 `memory #(
     .size(32'h0001_0000)
-    ,.initialize_mem(true)
+    ,.initialize_mem(TRUE)
     ,.byte0("code0.hex")
     ,.byte1("code1.hex")
     ,.byte2("code2.hex")
     ,.byte3("code3.hex")
-    ,.enable_rsp_addr(true)
+    ,.enable_rsp_addr(TRUE)
     ) code_mem (
     .clk(clk)
     ,.reset(reset)
@@ -39,12 +39,12 @@ core the_core(
 
 `memory #(
     .size(32'h0001_0000)
-    ,.initialize_mem(true)
+    ,.initialize_mem(TRUE)
     ,.byte0("data0.hex")
     ,.byte1("data1.hex")
     ,.byte2("data2.hex")
     ,.byte3("data3.hex")
-    ,.enable_rsp_addr(true)
+    ,.enable_rsp_addr(TRUE)
     ) data_mem (
     .clk(clk)
     ,.reset(reset)
@@ -76,8 +76,8 @@ always @(posedge clk)
 always @(posedge clk)
     if (data_mem_req.valid && data_mem_req.addr == `word_address_size'h0002_FFFC &&
         data_mem_req.do_write != {(`word_address_size/8){1'b0}})
-        halt <= true;
+        halt <= TRUE;
     else
-        halt <= false;
+        halt <= FALSE;
 
 endmodule

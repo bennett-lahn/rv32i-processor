@@ -26,12 +26,12 @@ endfunction
 // Returns: Boolean indicating whether instruction reads from rs1
 function logic uses_rs1(opcode_t opcode);
     case (opcode)
-        OPCODE_R_TYPE,  // R-type (ADD, SUB, AND, OR, XOR, etc.)
-        OPCODE_IMM,     // I-type ALU (ADDI, ANDI, ORI, etc.)
-        OPCODE_LOAD,    // I-type Load (LB, LH, LW, etc.)
-        OPCODE_S_TYPE,  // S-type Store (SB, SH, SW)
-        OPCODE_B_TYPE,  // B-type Branch (BEQ, BNE, BLT, etc.)
-        OPCODE_JALR:    // JALR (I-type Jump)
+        OPCODE_R_TYPE  // R-type (ADD, SUB, AND, OR, XOR, etc.)
+        ,OPCODE_IMM     // I-type ALU (ADDI, ANDI, ORI, etc.)
+        ,OPCODE_LOAD    // I-type Load (LB, LH, LW, etc.)
+        ,OPCODE_S_TYPE  // S-type Store (SB, SH, SW)
+        ,OPCODE_B_TYPE  // B-type Branch (BEQ, BNE, BLT, etc.)
+        ,OPCODE_JALR:    // JALR (I-type Jump)
             return TRUE;
         default:
             return FALSE;
@@ -44,9 +44,9 @@ endfunction
 // Returns: Boolean indicating whether instruction reads from rs2
 function logic uses_rs2(opcode_t opcode);
     case (opcode)
-        OPCODE_R_TYPE,  // R-type ALU (ADD, SUB, AND, OR, XOR, etc.)
-        OPCODE_S_TYPE,  // S-type Store (SB, SH, SW)
-        OPCODE_B_TYPE:  // B-type Branch (BEQ, BNE, BLT, etc.)
+        OPCODE_R_TYPE    // R-type ALU (ADD, SUB, AND, OR, XOR, etc.)
+        ,OPCODE_S_TYPE   // S-type Store (SB, SH, SW)
+        ,OPCODE_B_TYPE:  // B-type Branch (BEQ, BNE, BLT, etc.)
             return TRUE;
         default:
             return FALSE;
@@ -59,13 +59,13 @@ endfunction
 // Returns: Boolean indicating whether instruction writes to rd
 function logic uses_rd(opcode_t opcode);
     case (opcode)
-        OPCODE_R_TYPE,   // R-Type instructions (ADD, SUB, AND, OR, etc.)
-        OPCODE_IMM,      // I-Type ALU instructions (ADDI, ANDI, ORI, etc.)
-        OPCODE_LUI,      // LUI (Load Upper Immediate)
-        OPCODE_AUIPC,    // AUIPC (Add Upper Immediate to PC)
-        OPCODE_JAL,      // JAL (Jump and Link)
-        OPCODE_JALR,     // JALR (Jump and Link Register)
-        OPCODE_LOAD:     // Load instructions (LB, LH, LW, LBU, LHU)
+        OPCODE_R_TYPE    // R-Type instructions (ADD, SUB, AND, OR, etc.)
+        ,OPCODE_IMM      // I-Type ALU instructions (ADDI, ANDI, ORI, etc.)
+        ,OPCODE_LUI      // LUI (Load Upper Immediate)
+        ,OPCODE_AUIPC    // AUIPC (Add Upper Immediate to PC)
+        ,OPCODE_JAL      // JAL (Jump and Link)
+        ,OPCODE_JALR     // JALR (Jump and Link Register)
+        ,OPCODE_LOAD:    // Load instructions (LB, LH, LW, LBU, LHU)
             return TRUE; // These instructions write to rd
         default:
             return FALSE; // Other instructions do not write to rd

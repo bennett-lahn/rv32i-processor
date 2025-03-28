@@ -28,23 +28,23 @@ module memory32 #(
     reg [7:0]   data2[0:size/4 - 1];
     reg [7:0]   data3[0:size/4 - 1];
 
-    initial begin
-        // Vivado simulation fills the BRAM with X's and this makes a complete mess of
-        // branch mis-predictions that come from the processor.
-        for (int i = 0; i < size/4; i++) begin
-            data0[i] = 8'd0;
-            data1[i] = 8'd0;
-            data2[i] = 8'd0;
-            data3[i] = 8'd0;
-        end
-
-        if (initialize_mem) begin
-            $readmemh(byte0, data0, 0);
-            $readmemh(byte1, data1, 0);
-            $readmemh(byte2, data2, 0);
-            $readmemh(byte3, data3, 0);
-        end
-    end
+//    initial begin
+//        // Vivado simulation fills the BRAM with X's and this makes a complete mess of
+//        // branch mis-predictions that come from the processor.
+//        for (int i = 0; i < size/4; i++) begin
+//            data0[i] = 8'd0;
+//            data1[i] = 8'd0;
+//            data2[i] = 8'd0;
+//           data3[i] = 8'd0;
+//        end
+//
+//        if (initialize_mem) begin
+//            $readmemh(byte0, data0, 0);
+//            $readmemh(byte1, data1, 0);
+//            $readmemh(byte2, data2, 0);
+//            $readmemh(byte3, data3, 0);
+//        end
+//    end
 
     always @(posedge clk) begin
         rsp <= memory_io_no_rsp32;
