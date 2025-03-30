@@ -286,18 +286,20 @@ typedef enum logic [1:0] {
 // Pipeline register type for the Fetch stage
 typedef struct packed {
     logic               valid;      // Indicates if the fetched instruction is valid
-    instruction_t instr_data; // The complete instruction
+    instruction_t       instr_data; // The complete instruction
     word_t              pc;         // Program counter carried over
 } fetch_pipe_t;
 
 // Pipeline register type for the Decode stage
 typedef struct packed {
-    logic               valid;      // Indicates if the decode stage holds a valid instruction
-    instruction_t instr_data; // The complete instruction
-    word_t              pc;         // Program counter carried over
-    instr_select_t      instr_sel;  // Decoded instruction selection
-    fwd_src_t    fwd_rs1;    // Forwarding source for rs1: NONE, EXEC, or MEM
-    fwd_src_t    fwd_rs2;    // Forwarding source for rs2: NONE, EXEC, or MEM
+    logic            valid;         // Indicates if the decode stage holds a valid instruction
+    instruction_t    instr_data;    // The complete instruction
+    word_t           pc;            // Program counter carried over
+    instr_select_t   instr_sel;     // Decoded instruction selection
+    fwd_src_t        fwd_rs1;       // Forwarding source for rs1: NONE, EXEC, or MEM
+    fwd_src_t        fwd_rs2;       // Forwarding source for rs2: NONE, EXEC, or MEM
+    logic            branch_taken;  // True if branch is predicted taken (only valid for branches)
+    word_t           new_branch_pc; // Contains new pc value if branch taken (only valid for branches)
 } decode_pipe_t;
 
 // Pipeline register type for the Execute stage

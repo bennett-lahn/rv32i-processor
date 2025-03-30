@@ -89,6 +89,14 @@ assign rs2_data_from_regfile = register_io.read_data_2;
 instr_select_t decoded_instr;
 assign decoded_instr = parse_instruction(fetch_pipe.instr_data);
 
+// HIGH if instr in fetch stage is predicted taken (assumes instr is a branch)
+logic fetch_predict_taken;
+assign fetch_predict_taken = predict_branch_taken(b_type_t'(fetch_pipe.instr_data));
+
+// New pc value if instr in fetch stage is taken
+word_t fetch_predict_pc;
+assign fetch_predict_pc = build_branch_pc(b_type_t'(fetch_pipe.instr_data), fetch_pipe.pc);
+
 // True if branch misprediction occurred, PC must be overwritten, pipeline flushed of bad instr
 logic branch_mispredicted;
 // New PC if branch was mispredicted
@@ -217,21 +225,21 @@ always_comb begin
     // TODO: Update branch prediction so jumps don't require flushing (low priority)
     if (decode_pipe.valid & is_branch(casted_decode_instr.opcode)) begin
         // Case 1: Predict branch taken (correct); only flush decode
-        if (predict_branch_taken(b_type_t'(decode_pipe.instr_data)) && alu_result == REG_TRUE) begin 
+        if (decode_pipe.branch_taken && (alu_result == REG_TRUE)) begin 
             branch_mispredicted = FALSE;
             pc_override = REG_ZERO_VAL;
             flush_decode = TRUE;
             flush_fetch = FALSE;
         // Case 2: Predict branch taken (incorrect); flush fetch, but not decode which contains pc + 4
-        end else if (predict_branch_taken(b_type_t'(decode_pipe.instr_data)) && alu_result != REG_TRUE) begin
+        end else if (decode_pipe.branch_taken && (alu_result != REG_TRUE)) begin
             branch_mispredicted = TRUE;
             pc_override = decode_pipe.pc + 8;
             flush_decode = FALSE;
             flush_fetch = TRUE;
         // Case 3: Predict branch not taken (incorrect); flush decode, fetch
-        end else if (!predict_branch_taken(b_type_t'(decode_pipe.instr_data)) && alu_result == REG_TRUE) begin
+        end else if (!decode_pipe.branch_taken && (alu_result == REG_TRUE)) begin
             branch_mispredicted = TRUE;
-            pc_override = build_branch_pc(b_type_t'(decode_pipe.instr_data), decode_pipe.pc);
+            pc_override = decode_pipe.new_branch_pc;
             flush_decode = TRUE;
             flush_fetch = TRUE;
         // Case 4: Predict branch not taken (correct); do not flush anything, as PC is not modified by predictor or branch    
@@ -264,10 +272,10 @@ always_comb begin
     end else if (branch_mispredicted) begin
         update_pc = TRUE;
         new_pc_val = pc_override;
-    end else if (fetch_pipe.valid && is_branch(casted_fetch_instr.opcode)) begin
-        if (predict_branch_taken(b_type_t'(fetch_pipe.instr_data))) begin
+    end else if (fetch_pipe.valid & is_branch(casted_fetch_instr.opcode)) begin
+        if (fetch_predict_taken) begin
             update_pc = TRUE;
-            new_pc_val = build_branch_pc(b_type_t'(fetch_pipe.instr_data), fetch_pipe.pc);
+            new_pc_val = fetch_predict_pc;
         end else begin
             update_pc = FALSE;
             new_pc_val = REG_ZERO_VAL;
@@ -382,6 +390,8 @@ always_ff @(posedge clk) begin
         decode_pipe.instr_sel <= X_UNKNOWN;
         decode_pipe.fwd_rs1 <= FWD_NONE;
         decode_pipe.fwd_rs2 <= FWD_NONE;
+        decode_pipe.branch_taken <= FALSE;
+        decode_pipe.new_branch_pc <= REG_ZERO_VAL;
     end else if (insert_bubble_execute) begin
         decode_pipe.valid <= FALSE;
     end else begin
@@ -397,6 +407,8 @@ always_ff @(posedge clk) begin
         decode_pipe.instr_sel <= decoded_instr;
         decode_pipe.fwd_rs1 <= rs1_fwd_network;
         decode_pipe.fwd_rs2 <= rs2_fwd_network;
+        decode_pipe.branch_taken <= fetch_predict_taken;
+        decode_pipe.new_branch_pc <= fetch_predict_pc;
     end
 end
 
