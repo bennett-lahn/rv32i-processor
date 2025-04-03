@@ -1,6 +1,6 @@
 # RV32I Processor
 
-This repository contains the source code and test benches for a pipelined, in-order, single-issue RV32I processor. My processor supports the full RV32I instruction set (with additional extensions planned) and includes custom implementations for interfacing with memory and standard C functions for simulation and debugging.
+This repository contains the source code and test benches for a synthesizeable pipelined, in-order, single-issue RV32I processor. My processor supports the full RV32I instruction set (with additional extensions planned) and includes custom implementations for interfacing with memory and standard C functions for simulation and debugging.
 
 ## Purpose
 The goal of this project is to build a functional RV32I processor that can execute arbitrary C code. My design is implemented in SystemVerilog and includes modules for the core datapath, control logic, branch prediction, and hazard detection/forwarding. My processor is simulated using both Verilator and Icarus Verilog to verify correct behavior and performance.
@@ -35,7 +35,7 @@ The goal of this project is to build a functional RV32I processor that can execu
 The processor is simulated using both Verilator and Icarus Verilog.
 
 	- **Verilator:** Used for fast simulation, debugging, and more helpful warnings/errors; treats unknown values as zeros.
-	- **Icarus Verilog:** Used for more rigorous testing since it strictly propagates X values, exposing subtle bugs.
+	- **Icarus Verilog:** Used for alternate testing since it propagates X values, exposing subtle bugs.
 - **Test Programs:**
 
 	- **Assembly Tests:** Custom RV32I assembly test files exercise various control-flow, branch prediction, and hazard scenarios.
@@ -48,7 +48,6 @@ Debug prints are included in the pipeline stages (fetch, decode, execute, memory
 
 # Planned Improvements
 
-- **Synthesizeability on Altera FPGAs:** My design uses a pretty unconvential style of SystemVerilog, including heavy utilization of functions. I plan on massaging my design to make it synthesizeable on Altera FPGAs. This may involve some pretty extensive redesigning, as my processor utilizes unions (not supported by Quartus Prime) to interpret instruction data. 
 - **Enhanced Branch Prediction:** My processor currently implements a backwards taken, forwards not taken static predictor. This is better than nothing, but my implementation calculates the branch address in two places (very inefficient). I plan on implementing a **branch target buffer** to rectify this, as well as a more advanced predictor if I more deeply pipeline my procesor.
 - **Constrained Random Verification Testbench:** My main future goal for this project. Although my processor can run arbitrary C code, there are several known and certainly many more unknown bugs in my design because I lack a thorough testing system. Hopefully, this testbench will be a good introduction to verification on using a project I am already intimately familiar with.
 
